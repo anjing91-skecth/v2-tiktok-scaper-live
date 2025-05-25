@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TikTok Live Scraper</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #onlineUsers, #offlineUsers {
+            margin-top: 20px;
+        }
+        #onlineCards {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .userCard {
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 200px;
+        }
+        .status {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            background-color: green;
+        }
+        #offlineList {
+            list-style-type: none;
+            padding: 0;
+        }
+        #editUserListContainer {
+            display: none;
+            margin-top: 20px;
+        }
+        #loadingOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        #loadingOverlay span {
+            color: white;
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <h1>TikTok Live Scraper</h1>
+
+    <button id="checkStatus">Check Account Status</button>
+    <button id="startScraping" disabled>Start Scraping</button>
+    <button id="stopScraping">Stop Scraping</button>
+    <button id="editUserList">Edit Username List</button>
+    <button id="downloadData">Download Data</button>
+
+    <div id="onlineUsers">
+        <h2>Online Users</h2>
+        <div id="onlineCards"></div>
+    </div>
+
+    <div id="offlineUsers">
+        <h2>Offline Users</h2>
+        <ul id="offlineList"></ul>
+    </div>
+
+    <div id="editUserListContainer">
+        <h2>Edit Username List</h2>
+        <textarea id="usernameTextarea" rows="10" cols="50"></textarea><br>
+        <button id="saveUserList">Save Changes</button>
+    </div>
+
+    <div id="loadingOverlay">
+        <span>Loading...</span>
+    </div>
+
+    <script>
+        let liveAccounts = [];
+        let offlineAccounts = [];
+        let isMonitoring = false;
+
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const checkStatusButton = document.getElementById('checkStatus');
+        const startScrapingButton = document.getElementById('startScraping');
+
+        // Initialize accounts as offline on page load
+        window.onload = () => {
+            fetch('/api/initialize-accounts', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => console.log(data.message))
+                .catch(error => console.error('Error initializing accounts:', error));
+        };
+
+        function updateStartScrapingButton() {
+            startScrapingButton.disabled = liveAccounts.length === 0;
+        }
+
+        document.getElementById('checkStatus').addEventListener('click', () => {
+            loadingOverlay.style.display = 'flex';
+            checkStatusButton.disabled = true;
+
+            fetch('/api/check-live', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    // Update live and offline accounts
+                    liveAccounts = data.live;
+                    offlineAccounts = data.offline;
+
+                    // Update UI
+                    const onlineCards = document.getElementById('onlineCards');
+                    const offlineList = document.getElementById('offlineList');
+                    onlineCards.innerHTML = '';
+                    offlineList.innerHTML = '';
+
+                    liveAccounts.forEach(username => {
+                        const card = document.createElement('div');
+                        card.className = 'userCard';
+
+                        const name = document.createElement('span');
+                        name.textContent = username;
+
+                        const status = document.createElement('div');
+                        status.className = 'status';
+
+                        card.appendChild(name);
+                        card.appendChild(status);
+                        onlineCards.appendChild(card);
+                    });
+
+                    offlineAccounts.forEach(username => {
+                        const listItem = document.createElement('li');
+                        listItem.textContent = username;
+                        offlineList.appendChild(listItem);
+                    });
+
+                    // Update start scraping button
+                    updateStartScrapingButton();
+                })
+                .catch(error => console.error('Error:', error))
+                .finally(() => {
+                    loadingOverlay.style.display = 'none';
+                    checkStatusButton.disabled = false;
+                });
+        });
+
+        document.getElementById('startScraping').addEventListener('click', () => {
+            loadingOverlay.style.display = 'flex';
+            startScrapingButton.disabled = true;
+
+            fetch('/api/start-scraping-all', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data.message);
+                    isMonitoring = true; // Set monitoring status to on
+                })
+                .catch(error => console.error('Error:', error))
+                .finally(() => {
+                    loadingOverlay.style.display = 'none';
+                });
+        });
+
+        document.getElementById('stopScraping').addEventListener('click', () => {
+            fetch('/api/stop-monitoring', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data.message);
+                    isMonitoring = false; // Set monitoring status to off
+                })
+                .catch(error => console.error('Error:', error));
+        });
+
+        document.getElementById('editUserList').addEventListener('click', () => {
+            fetch('/api/get-list')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('usernameTextarea').value = data.usernames.join('\n');
+                    document.getElementById('editUserListContainer').style.display = 'block';
+                })
+                .catch(error => console.error('Error:', error));
+        });
+
+        document.getElementById('saveUserList').addEventListener('click', () => {
+            const updatedUsernames = document.getElementById('usernameTextarea').value.split('\n').filter(Boolean);
+            fetch('/api/edit-list', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ usernames: updatedUsernames })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Username list updated:', data);
+                alert('Username list saved successfully!');
+                document.getElementById('editUserListContainer').style.display = 'none';
+            })
+            .catch(error => console.error('Error:', error));
+        });
+
+        document.getElementById('downloadData').addEventListener('click', () => {
+            const username = prompt('Enter username to download data for:');
+            if (username) {
+                window.location.href = `/api/download-data/${username}`;
+            }
+        });
+    </script>
+</body>
+</html>
