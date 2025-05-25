@@ -1,0 +1,68 @@
+{
+  "glow_babies1": {
+    "username": "glow_babies1",
+    "timestamp_start": "26/05/2025 00:01:14",
+    "viewer": 94,
+    "peak_viewer": 102,
+    "gifts": [
+      {
+        "name": "Heart Me",
+        "diamond": 1,
+        "gifter": "fans_tasya_glowbabies01",
+        "timestamp": 1748192590607,
+        "count": 1
+      },
+      {
+        "name": "Whale diving",
+        "diamond": 2150,
+        "gifter": "imfvkinbitc1",
+        "timestamp": 1748192538932,
+        "count": 1
+      },
+      {
+        "name": "Fiery Dragon",
+        "diamond": 4888,
+        "gifter": "teoleehung89",
+        "timestamp": 1748192517497,
+        "count": 1
+      },
+      {
+        "name": "Rose",
+        "diamond": 1,
+        "gifter": "dj.araki",
+        "timestamp": 1748192512261,
+        "count": 1
+      },
+      {
+        "name": "Rose",
+        "diamond": 1,
+        "gifter": "dj.araki",
+        "timestamp": 1748192506662,
+        "count": 1
+      },
+      {
+        "name": "TikTok",
+        "diamond": 2,
+        "gifter": "dj.araki",
+        "timestamp": 1748192497896,
+        "count": 2
+      },
+      {
+        "name": "Rose",
+        "diamond": 1,
+        "gifter": "dj.araki",
+        "timestamp": 1748192485098,
+        "count": 1
+      }
+    ],
+    "total_diamond": 7044,
+    "leaderboard": {
+      "dj.araki": 5,
+      "teoleehung89": 4888,
+      "imfvkinbitc1": 2150,
+      "fans_tasya_glowbabies01": 1
+    },
+    "timestamp_end": null,
+    "duration": null
+  }
+}

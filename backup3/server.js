@@ -11,7 +11,6 @@ const PORT = 3000;
 const accountFilePath = path.join(__dirname, 'account.txt');
 const logFilePath = path.join(__dirname, 'scraping.log');
 const liveDataFile = path.join(__dirname, 'live_data.json');
-const csvFilePath = path.join(__dirname, 'live_data.csv');
 
 app.use(cors());
 app.use(express.json());
@@ -305,36 +304,6 @@ app.post('/api/stop-monitoring', (req, res) => {
     res.json({ message: 'Monitoring stopped.' });
 });
 
-// Stop and reset scraping, disconnect all, set all offline, save data
-app.post('/api/stop-scraping-and-reset', async (req, res) => {
-    // 1. Save all data
-    saveLiveDataToFile();
-    saveLiveDataToCSV();
-
-    // 2. Disconnect all connections
-    if (connectedAccounts && connectedAccounts.length > 0) {
-        for (const username of connectedAccounts) {
-            try {
-                // Try to disconnect if possible
-                // (WebcastPushConnection does not keep global ref, so just rely on monitoring logic)
-            } catch (e) {}
-        }
-    }
-    // 3. Set all akun ke offline, kosongkan liveAccounts, connectedAccounts, dsb
-    let usernames = [];
-    try {
-        usernames = fs.readFileSync(accountFilePath, 'utf-8').split('\n').filter(Boolean);
-    } catch (e) {}
-    offlineAccounts = [...new Set(usernames)];
-    liveAccounts = [];
-    connectedAccounts = [];
-    errorAccounts = [];
-    isMonitoring = false;
-    // 4. Reset liveDataStore (jika ingin data baru, atau biarkan untuk histori)
-    // Object.keys(liveDataStore).forEach(k => delete liveDataStore[k]);
-    res.json({ message: 'All monitoring stopped, all accounts set to offline, data saved, monitoring off.' });
-});
-
 // Get current username list
 app.get('/api/get-list', (req, res) => {
     try {
@@ -352,7 +321,6 @@ const processedGiftMsgIds = {};
 
 function saveLiveDataToFile() {
     fs.writeFileSync(liveDataFile, JSON.stringify(liveDataStore, null, 2));
-    saveLiveDataToCSV(); // Save CSV every time live_data.json is saved
 }
 
 function formatDateToGMT7(date) {
@@ -363,7 +331,6 @@ function formatDateToGMT7(date) {
 function initLiveData(username, metadata) {
     liveDataStore[username] = {
         username,
-        room_id: metadata && metadata.roomId ? metadata.roomId : null,
         timestamp_start: metadata && metadata.create_time ? formatDateToGMT7(new Date(metadata.create_time * 1000)) : formatDateToGMT7(new Date()),
         viewer: 0,
         peak_viewer: 0,
@@ -419,7 +386,7 @@ function updateLiveData(username, data) {
 function finalizeLiveData(username) {
     if (!liveDataStore[username]) return;
     liveDataStore[username].timestamp_end = formatDateToGMT7(new Date());
-    const start = new Date(liveDataStore[username].timestamp_start.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1'));
+    const start = new Date(liveDataStore[username].timestamp_start.replace(/(\d{2})-(\d{2})-(\d{4})/, '$3-$2-$1'));
     const end = new Date();
     const durationMs = end - start;
     const minutes = Math.floor(durationMs / 60000);
@@ -427,7 +394,6 @@ function finalizeLiveData(username) {
     liveDataStore[username].duration = `${minutes}m ${seconds}s`;
     saveLiveDataToFile();
     emitLiveDataFinalize(username);
-    saveLiveDataToCSV(); // Save CSV on finalize
 }
 
 // --- SOCKET.IO EMIT HELPERS ---
@@ -455,59 +421,3 @@ server.listen(PORT, () => {
 // Start monitoring live accounts on server start
 monitorLiveAccounts();
 monitorConnectedAccounts();
-
-// Periodic save every 15 minutes
-setInterval(() => {
-    saveLiveDataToCSV();
-}, 15 * 60 * 1000);
-
-// Save all live data to CSV on exit
-process.on('SIGINT', () => {
-    saveLiveDataToCSV();
-    process.exit();
-});
-process.on('SIGTERM', () => {
-    saveLiveDataToCSV();
-    process.exit();
-});
-
-// CSV handling
-function saveLiveDataToCSV() {
-    // Header
-    const header = [
-        'tanggal dan jam', 'roomid', 'akun', 'durasi live', 'peakview', 'totalgift',
-        ...Array.from({length: 10}, (_, i) => `topspender${i+1}`)
-    ];
-    let rows = [header.join('|')];
-    for (const username in liveDataStore) {
-        const data = liveDataStore[username];
-        if (!data.room_id) continue; // skip if no room id
-        // Format tanggal dan jam dari timestamp_start jika ada, else '-'
-        const tgl = data.timestamp_start || '-';
-        const row = [
-            tgl,
-            data.room_id,
-            data.username,
-            data.duration || '-',
-            data.peak_viewer || 0,
-            data.total_diamond || 0
-        ];
-        // Top spender
-        const sorted = Object.entries(data.leaderboard||{}).sort((a,b)=>b[1]-a[1]);
-        for (let i=0; i<10; i++) {
-            if (sorted[i]) {
-                row.push(`${sorted[i][0]}(${sorted[i][1]})`);
-            } else {
-                row.push('');
-            }
-        }
-        rows.push(row.join('|'));
-    }
-    fs.writeFileSync(csvFilePath, rows.join('\n'));
-}
-
-// Endpoint for save and download CSV
-app.get('/api/save-and-download-csv', (req, res) => {
-    saveLiveDataToCSV();
-    res.download(csvFilePath, 'live_data.csv');
-});

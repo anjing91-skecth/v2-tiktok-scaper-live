@@ -142,9 +142,9 @@
 
     <button id="checkStatus">Check Account Status</button>
     <button id="startScraping" disabled>Start Scraping</button>
-    <button id="stopAndReset">Stop & Reset</button>
+    <button id="stopScraping">Stop Scraping</button>
     <button id="editUserList">Edit Username List</button>
-    <button id="downloadData">Save and Download</button>
+    <button id="downloadData">Save & Download Data</button>
 
     <div id="onlineUsers">
         <h2>Online Users</h2>
@@ -277,21 +277,14 @@
                 });
         });
 
-        document.getElementById('stopAndReset').addEventListener('click', () => {
-            loadingOverlay.style.display = 'flex';
-            fetch('/api/stop-scraping-and-reset', { method: 'POST' })
-                .then(res => res.json())
+        document.getElementById('stopScraping').addEventListener('click', () => {
+            fetch('/api/stop-monitoring', { method: 'POST' })
+                .then(response => response.json())
                 .then(data => {
-                    alert('Scraping stopped, semua akun direset offline, data disimpan.');
-                    // Reset UI ke kondisi awal
-                    document.getElementById('onlineCards').innerHTML = '';
-                    document.getElementById('offlineList').innerHTML = '';
-                    liveAccounts = [];
-                    offlineAccounts = [];
-                    isMonitoring = false;
+                    console.log(data.message);
+                    isMonitoring = false; // Set monitoring status to off
                 })
-                .catch(err => alert('Gagal stop & reset: ' + err))
-                .finally(() => loadingOverlay.style.display = 'none');
+                .catch(error => console.error('Error:', error));
         });
 
         document.getElementById('editUserList').addEventListener('click', () => {
@@ -321,7 +314,10 @@
         });
 
         document.getElementById('downloadData').addEventListener('click', () => {
-            window.location.href = '/api/save-and-download-csv';
+            fetch('/api/save-csv', { method: 'POST' })
+                .then(() => {
+                    window.location.href = '/api/download-csv';
+                });
         });
 
         function renderLiveDataCard(username, data) {
