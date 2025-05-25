@@ -4,7 +4,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "postinstall": "sed -i 's/if (webcastObject.giftDetails.giftImage)/if (webcastObject.giftDetails && webcastObject.giftDetails.giftImage)/' node_modules/tiktok-live-connector/dist/lib/_legacy/data-converter.js"
+    "postinstall": "sed -i \"s/webcastObject.giftDetails.giftImage/webcastObject.giftDetails?.giftImage/g\" node_modules/tiktok-live-connector/dist/lib/_legacy/data-converter.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
