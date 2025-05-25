@@ -11,9 +11,6 @@ const tiktokConnection = new WebcastPushConnection(username);
 let connected = false;
 let giftCounter = 0;
 
-// Set untuk menyimpan kombinasi msgId+groupId yang sudah diproses
-const processedGifts = new Set();
-
 // Log messages dengan timestamp
 function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
@@ -64,13 +61,6 @@ tiktokConnection.connect()
     
     // Gift event
     tiktokConnection.on('gift', (data) => {
-      // Cek duplikasi gift berdasarkan msgId+groupId
-      const uniqueGiftKey = `${data.msgId || ''}_${data.groupId || ''}`;
-      if (processedGifts.has(uniqueGiftKey)) {
-        log(`⚠️ Duplikat gift terdeteksi (msgId/groupId: ${uniqueGiftKey}), diabaikan.`);
-        return;
-      }
-      processedGifts.add(uniqueGiftKey);
       log(`🎁 Gift received: ${data.uniqueId} sent ${data.giftName} x${data.repeatCount || 1} (${data.diamondCount} diamonds)`);
       logGiftData(data);
     });

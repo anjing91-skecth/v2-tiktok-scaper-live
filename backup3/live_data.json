@@ -1,67 +1,123 @@
 {
   "glow_babies1": {
     "username": "glow_babies1",
-    "timestamp_start": "26/05/2025 00:01:14",
-    "viewer": 94,
-    "peak_viewer": 102,
+    "room_id": "7508409742001523461",
+    "timestamp_start": "26/05/2025 00:44:40",
+    "viewer": 59,
+    "peak_viewer": 75,
     "gifts": [
       {
-        "name": "Heart Me",
-        "diamond": 1,
-        "gifter": "fans_tasya_glowbabies01",
-        "timestamp": 1748192590607,
-        "count": 1
-      },
-      {
-        "name": "Whale diving",
-        "diamond": 2150,
-        "gifter": "imfvkinbitc1",
-        "timestamp": 1748192538932,
-        "count": 1
-      },
-      {
-        "name": "Fiery Dragon",
-        "diamond": 4888,
-        "gifter": "teoleehung89",
-        "timestamp": 1748192517497,
-        "count": 1
-      },
-      {
         "name": "Rose",
-        "diamond": 1,
-        "gifter": "dj.araki",
-        "timestamp": 1748192512261,
-        "count": 1
-      },
-      {
-        "name": "Rose",
-        "diamond": 1,
-        "gifter": "dj.araki",
-        "timestamp": 1748192506662,
-        "count": 1
-      },
-      {
-        "name": "TikTok",
         "diamond": 2,
-        "gifter": "dj.araki",
-        "timestamp": 1748192497896,
+        "gifter": "1qb4lwdd",
+        "timestamp": 1748195522368,
         "count": 2
       },
       {
         "name": "Rose",
+        "diamond": 2,
+        "gifter": "mr.jack1070",
+        "timestamp": 1748195512266,
+        "count": 2
+      },
+      {
+        "name": "Rose",
+        "diamond": 15,
+        "gifter": "1qb4lwdd",
+        "timestamp": 1748195500857,
+        "count": 15
+      },
+      {
+        "name": "I love you",
+        "diamond": 10,
+        "gifter": "1qb4lwdd",
+        "timestamp": 1748195472944,
+        "count": 1
+      },
+      {
+        "name": "Rosa",
+        "diamond": 10,
+        "gifter": "1qb4lwdd",
+        "timestamp": 1748195465073,
+        "count": 1
+      },
+      {
+        "name": "GG",
         "diamond": 1,
-        "gifter": "dj.araki",
-        "timestamp": 1748192485098,
+        "gifter": "mr.jack1070",
+        "timestamp": 1748195448305,
+        "count": 1
+      },
+      {
+        "name": "Fried",
+        "diamond": 1,
+        "gifter": "mr.jack1070",
+        "timestamp": 1748195445127,
+        "count": 1
+      },
+      {
+        "name": "Power Hug",
+        "diamond": 1,
+        "gifter": "mr.jack1070",
+        "timestamp": 1748195442620,
+        "count": 1
+      },
+      {
+        "name": "Ice Cream Cone",
+        "diamond": 1,
+        "gifter": "mr.jack1070",
+        "timestamp": 1748195439453,
+        "count": 1
+      },
+      {
+        "name": "Rose",
+        "diamond": 2,
+        "gifter": "riskacaca1107",
+        "timestamp": 1748195429542,
+        "count": 2
+      }
+    ],
+    "total_diamond": 57,
+    "leaderboard": {
+      "riskacaca1107": 4,
+      "mr.jack1070": 11,
+      "sarena_001": 5,
+      "1qb4lwdd": 37
+    },
+    "timestamp_end": null,
+    "duration": null
+  },
+  "velora.drama.pilihan.emo": {
+    "username": "velora.drama.pilihan.emo",
+    "room_id": "7508423616237734661",
+    "timestamp_start": "26/05/2025 00:51:28",
+    "viewer": 101,
+    "peak_viewer": 116,
+    "gifts": [
+      {
+        "name": "TikTok",
+        "diamond": 1,
+        "gifter": "merdekaindonesia080",
+        "timestamp": 1748195544877,
         "count": 1
       }
     ],
-    "total_diamond": 7044,
+    "total_diamond": 1,
     "leaderboard": {
-      "dj.araki": 5,
-      "teoleehung89": 4888,
-      "imfvkinbitc1": 2150,
-      "fans_tasya_glowbabies01": 1
+      "merdekaindonesia080": 1
     },
+    "timestamp_end": null,
+    "duration": null
+  },
+  "pufflegirls3": {
+    "username": "pufflegirls3",
+    "room_id": "7508406405079763718",
+    "timestamp_start": "26/05/2025 00:51:29",
+    "viewer": 116,
+    "peak_viewer": 122,
+    "gifts": [],
+    "total_diamond": 0,
+    "leaderboard": {},
     "timestamp_end": null,
     "duration": null
   }

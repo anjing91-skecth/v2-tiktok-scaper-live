@@ -7,7 +7,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const accountFilePath = path.join(__dirname, 'account.txt');
 const logFilePath = path.join(__dirname, 'scraping.log');
 const liveDataFile = path.join(__dirname, 'live_data.json');
