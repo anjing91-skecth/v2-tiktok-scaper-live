@@ -13,5 +13,6 @@
     "socket.io": "^4.8.1",
     "tiktok-live-connector": "^2.0.5-beta1",
     "ws": "^8.18.2"
-  }
+  },
+  "type": "commonjs"
 }
