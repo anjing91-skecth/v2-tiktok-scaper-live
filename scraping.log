@@ -1,0 +1,24 @@
+[2025-05-26T10:55:20.344Z] Failed to load live_data.json: ReferenceError: Cannot access 'liveDataStore' before initialization
+[2025-05-26T10:55:20.344Z] Autorecover ON: starting check-live and scraping
+[uncaughtException] 2025-05-26T10:55:20.349Z - Error: listen EADDRINUSE: address already in use :::3000
+    at Server.setupListenHandle [as _listen2] (node:net:1908:16)
+    at listenInCluster (node:net:1965:12)
+    at Server.listen (node:net:2067:7)
+    at Object.<anonymous> (/workspaces/v2-tiktok-scaper-live/server.js:520:8)
+    at Module._compile (node:internal/modules/cjs/loader:1529:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1613:10)
+    at Module.load (node:internal/modules/cjs/loader:1275:32)
+    at Module._load (node:internal/modules/cjs/loader:1096:12)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:164:12)
+    at node:internal/main/run_main_module:28:49
+[unhandledRejection] 2025-05-26T10:55:20.350Z - TypeError: res.setHeader is not a function
+    at Function.handle (/workspaces/v2-tiktok-scaper-live/node_modules/express/lib/application.js:161:9)
+    at app.handle.method (/workspaces/v2-tiktok-scaper-live/server.js:220:17)
+    at new Promise (<anonymous>)
+    at doAutorecover (/workspaces/v2-tiktok-scaper-live/server.js:219:15)
+    at Object.<anonymous> (/workspaces/v2-tiktok-scaper-live/server.js:226:1)
+    at Module._compile (node:internal/modules/cjs/loader:1529:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1613:10)
+    at Module.load (node:internal/modules/cjs/loader:1275:32)
+    at Module._load (node:internal/modules/cjs/loader:1096:12)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:164:12)

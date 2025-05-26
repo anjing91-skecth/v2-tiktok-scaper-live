@@ -62,9 +62,19 @@ app.post('/api/check-live', async (req, res) => {
     for (const username of accountsToCheck) {
         const connection = new WebcastPushConnection(username);
         try {
-            await connection.connect();
-            liveAccounts.push(username);
-            console.log(`${username} is live.`);
+            const state = await connection.connect();
+            // Cek status_code pada metadata (roomInfo.status_code)
+            let statusCode = 0;
+            if (state && state.roomInfo && typeof state.roomInfo.status_code !== 'undefined') {
+                statusCode = state.roomInfo.status_code;
+            }
+            if (statusCode === 0) {
+                liveAccounts.push(username);
+                console.log(`${username} is live (status_code: 0).`);
+            } else {
+                offlineAccounts.push(username);
+                console.log(`${username} is offline (status_code: ${statusCode}).`);
+            }
         } catch (error) {
             if (error.message && error.message.includes("isn't online")) {
                 offlineAccounts.push(username);
@@ -82,9 +92,15 @@ app.post('/api/check-live', async (req, res) => {
 // Ensure monitoring starts as off
 let isMonitoring = false;
 
+// Simpan interval ID agar bisa di-clear
+let monitorLiveInterval = null;
+let monitorConnectedInterval = null;
+let activeConnections = {};
+
 // Monitor live accounts for changes only if monitoring is active
 function monitorLiveAccounts() {
-    setInterval(() => {
+    if (monitorLiveInterval) clearInterval(monitorLiveInterval);
+    monitorLiveInterval = setInterval(() => {
         if (!isMonitoring) return; // Skip jika monitoring tidak aktif
 
         // Hanya cek akun offline yang belum terhubung
@@ -107,6 +123,7 @@ function monitorLiveAccounts() {
                         if (isMonitoring && !connectedAccounts.includes(username)) {
                             // Buat koneksi baru untuk monitoring
                             const monitorConnection = new WebcastPushConnection(username);
+                            activeConnections[username] = monitorConnection;
                             monitorConnection.connect()
                                 .then((state) => {
                                     connectedAccounts.push(username);
@@ -133,14 +150,14 @@ function monitorLiveAccounts() {
     }, 15 * 60 * 1000); // Tetap cek setiap 15 menit
 }
 
-// Monitor connected accounts for disconnections
 function monitorConnectedAccounts() {
-    setInterval(() => {
+    if (monitorConnectedInterval) clearInterval(monitorConnectedInterval);
+    monitorConnectedInterval = setInterval(() => {
         if (!isMonitoring) return; // Skip if monitoring is off
 
         connectedAccounts.forEach((username, index) => {
             const connection = new WebcastPushConnection(username);
-
+            activeConnections[username] = connection;
             connection.connect()
                 .then(() => {
                     console.log(`${username} is still connected.`);
@@ -171,13 +188,51 @@ async function isAccountStillLive(username) {
 // Store reconnect attempts per username
 let reconnectAttempts = {};
 
+// Autorecover flag
+let autorecover = false;
+const autorecoverFile = path.join(__dirname, 'autorecover.flag');
+
+// Load live data dari file saat server start
+function loadLiveDataFromFile() {
+    if (fs.existsSync(liveDataFile)) {
+        try {
+            const data = fs.readFileSync(liveDataFile, 'utf-8');
+            const parsed = JSON.parse(data);
+            Object.assign(liveDataStore, parsed);
+        } catch (e) {
+            fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] Failed to load live_data.json: ${e}\n`);
+        }
+    }
+}
+loadLiveDataFromFile();
+
+// Load autorecover flag dari file
+if (fs.existsSync(autorecoverFile)) {
+    autorecover = true;
+}
+
+// Autorecover logic: jika server start dan autorecover on, mulai check akun dan scraping
+async function doAutorecover() {
+    if (autorecover) {
+        fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] Autorecover ON: starting check-live and scraping\n`);
+        // Jalankan check-live
+        await new Promise(resolve => {
+            app.handle({ method: 'POST', url: '/api/check-live' }, { json: () => resolve() });
+        });
+        // Jalankan scraping
+        app.handle({ method: 'POST', url: '/api/start-scraping-all' }, { json: () => {} });
+    }
+}
+doAutorecover();
+
 // Start scraping and enable monitoring
 app.post('/api/start-scraping-all', (req, res) => {
     if (liveAccounts.length === 0) {
         return res.status(400).json({ error: 'No live accounts to scrape.' });
     }
-
     isMonitoring = true; // Enable monitoring
+    autorecover = true;
+    fs.writeFileSync(autorecoverFile, 'on');
 
     liveAccounts.forEach(username => {
         const connection = new WebcastPushConnection(username);
@@ -301,7 +356,18 @@ app.post('/api/start-scraping-all', (req, res) => {
 
 // Stop monitoring
 app.post('/api/stop-monitoring', (req, res) => {
-    isMonitoring = false; // Disable monitoring
+    isMonitoring = false;
+    autorecover = false;
+    if (fs.existsSync(autorecoverFile)) fs.unlinkSync(autorecoverFile);
+    // Disconnect all active connections
+    for (const uname in activeConnections) {
+        try {
+            activeConnections[uname].disconnect && activeConnections[uname].disconnect();
+        } catch (e) {}
+    }
+    activeConnections = {};
+    if (monitorLiveInterval) clearInterval(monitorLiveInterval);
+    if (monitorConnectedInterval) clearInterval(monitorConnectedInterval);
     res.json({ message: 'Monitoring stopped.' });
 });
 
@@ -312,14 +378,15 @@ app.post('/api/stop-scraping-and-reset', async (req, res) => {
     saveLiveDataToCSV();
 
     // 2. Disconnect all connections
-    if (connectedAccounts && connectedAccounts.length > 0) {
-        for (const username of connectedAccounts) {
-            try {
-                // Try to disconnect if possible
-                // (WebcastPushConnection does not keep global ref, so just rely on monitoring logic)
-            } catch (e) {}
-        }
+    for (const uname in activeConnections) {
+        try {
+            activeConnections[uname].disconnect && activeConnections[uname].disconnect();
+        } catch (e) {}
     }
+    activeConnections = {};
+    if (monitorLiveInterval) clearInterval(monitorLiveInterval);
+    if (monitorConnectedInterval) clearInterval(monitorConnectedInterval);
+
     // 3. Set all akun ke offline, kosongkan liveAccounts, connectedAccounts, dsb
     let usernames = [];
     try {
@@ -330,6 +397,8 @@ app.post('/api/stop-scraping-and-reset', async (req, res) => {
     connectedAccounts = [];
     errorAccounts = [];
     isMonitoring = false;
+    autorecover = false;
+    if (fs.existsSync(autorecoverFile)) fs.unlinkSync(autorecoverFile);
     // 4. Reset liveDataStore (jika ingin data baru, atau biarkan untuk histori)
     // Object.keys(liveDataStore).forEach(k => delete liveDataStore[k]);
     res.json({ message: 'All monitoring stopped, all accounts set to offline, data saved, monitoring off.' });
@@ -510,4 +579,19 @@ function saveLiveDataToCSV() {
 app.get('/api/save-and-download-csv', (req, res) => {
     saveLiveDataToCSV();
     res.download(csvFilePath, 'live_data.csv');
+});
+
+// Global error handler untuk mencegah server crash
+process.on('uncaughtException', (err) => {
+    const msg = `[uncaughtException] ${new Date().toISOString()} - ${err.stack || err}`;
+    fs.appendFileSync(logFilePath, msg + '\n');
+    console.error(msg);
+    // Jangan exit, biarkan server tetap jalan
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    const msg = `[unhandledRejection] ${new Date().toISOString()} - ${reason && reason.stack ? reason.stack : reason}`;
+    fs.appendFileSync(logFilePath, msg + '\n');
+    console.error(msg);
+    // Jangan exit, biarkan server tetap jalan
 });
