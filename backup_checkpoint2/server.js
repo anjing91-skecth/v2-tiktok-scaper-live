@@ -48,6 +48,15 @@ app.post('/api/initialize-accounts', (req, res) => {
 
 // Update check-live to only check offline accounts
 app.post('/api/check-live', async (req, res) => {
+    // Jika offlineAccounts kosong, ambil ulang semua akun dari file
+    if (offlineAccounts.length === 0) {
+        try {
+            const usernames = fs.readFileSync(accountFilePath, 'utf-8').split('\n').filter(Boolean);
+            offlineAccounts = [...new Set(usernames)];
+        } catch (e) {
+            return res.status(500).json({ error: 'Failed to read username list.' });
+        }
+    }
     const accountsToCheck = [...offlineAccounts]; // Only check offline accounts
     offlineAccounts = [];
 

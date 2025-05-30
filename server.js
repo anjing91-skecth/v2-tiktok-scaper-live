@@ -6,12 +6,15 @@ const { WebcastPushConnection } = require("tiktok-live-connector");
 const http = require('http');
 const { Server } = require('socket.io');
 
+let autorecover = false;
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const accountFilePath = path.join(__dirname, 'account.txt');
 const logFilePath = path.join(__dirname, 'scraping.log');
 const liveDataFile = path.join(__dirname, 'live_data.json');
 const csvFilePath = path.join(__dirname, 'live_data.csv');
+const autorecoverFile = path.join(__dirname, 'autorecover.flag');
 
 app.use(cors());
 app.use(express.json());
@@ -54,303 +57,97 @@ let connectedAccounts = [];
     }
 })();
 
-// Update check-live to only check offline accounts
-app.post('/api/check-live', async (req, res) => {
-    const accountsToCheck = [...offlineAccounts]; // Only check offline accounts
-    offlineAccounts = [];
+// --- CONNECTION MANAGEMENT REFACTOR ---
+// Use a single connection per account, reused between check-live and scraping
+// Attach listeners only on start-scraping, not during check-live
+// Robust reconnect logic: try 2 times, then move to offline and cleanup
 
+// Map to track if listeners are attached
+const listenersAttached = {};
+let activeConnections = {};
+let reconnectAttempts = {};
+// Patch: check-live only connects, does not disconnect, and stores connection in activeConnections
+app.post('/api/check-live', async (req, res) => {
+    const accountsToCheck = [...offlineAccounts];
+    offlineAccounts = [];
+    let live = [];
+    let offline = [];
+    let error = [];
     for (const username of accountsToCheck) {
-        const connection = new WebcastPushConnection(username);
+        let connection = activeConnections[username];
+        if (!connection) {
+            connection = new WebcastPushConnection(username);
+            activeConnections[username] = connection;
+        }
         try {
-            const state = await connection.connect();
-            // Cek status_code pada metadata (roomInfo.status_code)
-            let statusCode = 0;
-            if (state && state.roomInfo && typeof state.roomInfo.status_code !== 'undefined') {
-                statusCode = state.roomInfo.status_code;
-            }
-            if (statusCode === 0) {
-                liveAccounts.push(username);
-                console.log(`${username} is live (status_code: 0).`);
-            } else {
+            await connection.connect();
+            if (!liveAccounts.includes(username)) liveAccounts.push(username);
+            live.push(username);
+        } catch (err) {
+            if (err.message && err.message.includes("isn't online")) {
                 offlineAccounts.push(username);
-                console.log(`${username} is offline (status_code: ${statusCode}).`);
-            }
-        } catch (error) {
-            if (error.message && error.message.includes("isn't online")) {
-                offlineAccounts.push(username);
-                console.log(`${username} is offline.`);
+                offline.push(username);
             } else {
                 errorAccounts.push(username);
-                console.error(`Error checking ${username}:`, error.message);
+                error.push(username);
             }
         }
     }
-
-    res.json({ live: liveAccounts, offline: offlineAccounts, error: errorAccounts });
+    // Setelah check, jika masih ada offline, aktifkan autochecker
+    if (offlineAccounts.length > 0) {
+        startAutochecker();
+    } else {
+        stopAutochecker();
+    }
+    res.json({ live, offline, error });
 });
 
-// Ensure monitoring starts as off
-let isMonitoring = false;
-
-// Simpan interval ID agar bisa di-clear
-let monitorLiveInterval = null;
-let monitorConnectedInterval = null;
-let activeConnections = {};
-
-// Monitor live accounts for changes only if monitoring is active
-function monitorLiveAccounts() {
-    if (monitorLiveInterval) clearInterval(monitorLiveInterval);
-    monitorLiveInterval = setInterval(() => {
-        if (!isMonitoring) return; // Skip jika monitoring tidak aktif
-
-        // Hanya cek akun offline yang belum terhubung
-        for (let i = offlineAccounts.length - 1; i >= 0; i--) {
-            const username = offlineAccounts[i];
-            console.log(`Checking if ${username} is now live...`);
-            
-            try {
-                const connection = new WebcastPushConnection(username);
-                connection.connect()
-                    .then(() => {
-                        // Akun sekarang live, pindahkan dari offline ke live
-                        offlineAccounts.splice(i, 1);
-                        if (!liveAccounts.includes(username)) {
-                            liveAccounts.push(username);
-                        }
-                        console.log(`${username} is now live. Added to live accounts list.`);
-                        
-                        // Connect jika monitoring aktif
-                        if (isMonitoring && !connectedAccounts.includes(username)) {
-                            // Buat koneksi baru untuk monitoring
-                            const monitorConnection = new WebcastPushConnection(username);
-                            activeConnections[username] = monitorConnection;
-                            monitorConnection.connect()
-                                .then((state) => {
-                                    connectedAccounts.push(username);
-                                    const logMessage = `${new Date().toISOString()} - Connected to ${username}'s live stream.\n`;
-                                    fs.appendFileSync(logFilePath, logMessage);
-                                    console.log(logMessage);
-                                    
-                                    // Init data dan setup listener
-                                    initLiveData(username, state);
-                                    setupListeners(monitorConnection, username);
-                                })
-                                .catch(error => {
-                                    console.error(`Error connecting to ${username} for monitoring:`, error.message);
-                                });
-                        }
-                    })
-                    .catch(() => {
-                        // Tetap offline, biarkan di list offlineAccounts
-                    });
-            } catch (error) {
-                console.error(`Unexpected error checking ${username}:`, error.message);
-            }
-        }
-    }, 15 * 60 * 1000); // Tetap cek setiap 15 menit
-}
-
-function monitorConnectedAccounts() {
-    if (monitorConnectedInterval) clearInterval(monitorConnectedInterval);
-    monitorConnectedInterval = setInterval(() => {
-        if (!isMonitoring) return; // Skip if monitoring is off
-
-        connectedAccounts.forEach((username, index) => {
-            const connection = new WebcastPushConnection(username);
-            activeConnections[username] = connection;
-            connection.connect()
-                .then(() => {
-                    console.log(`${username} is still connected.`);
-                })
-                .catch((error) => {
-                    console.error(`Connection lost for ${username}:`, error.message);
-                    connectedAccounts.splice(index, 1);
-                    offlineAccounts.push(username);
-                    const logMessage = `${new Date().toISOString()} - ${username} moved to offline due to disconnection.\n`;
-                    fs.appendFileSync(logFilePath, logMessage);
-                    console.log(logMessage);
-                });
-        });
-    }, 10 * 60 * 1000); // Check every 10 minutes
-}
-
-// Helper: Check if account is still live
-async function isAccountStillLive(username) {
-    const connection = new WebcastPushConnection(username);
-    try {
-        await connection.connect();
-        return true;
-    } catch (error) {
-        return false;
-    }
-}
-
-// Store reconnect attempts per username
-let reconnectAttempts = {};
-
-// Autorecover flag
-let autorecover = false;
-const autorecoverFile = path.join(__dirname, 'autorecover.flag');
-
-// Load live data dari file saat server start
-function loadLiveDataFromFile() {
-    if (fs.existsSync(liveDataFile)) {
-        try {
-            const data = fs.readFileSync(liveDataFile, 'utf-8');
-            const parsed = JSON.parse(data);
-            Object.assign(liveDataStore, parsed);
-        } catch (e) {
-            fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] Failed to load live_data.json: ${e}\n`);
-        }
-    }
-}
-loadLiveDataFromFile();
-
-// Load autorecover flag dari file
-if (fs.existsSync(autorecoverFile)) {
-    autorecover = true;
-}
-
-// Autorecover logic: jika server start dan autorecover on, mulai check akun dan scraping
-async function doAutorecover() {
-    if (autorecover) {
-        fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] Autorecover ON: starting check-live and scraping\n`);
-        // Jalankan check-live
-        await new Promise(resolve => {
-            app.handle({ method: 'POST', url: '/api/check-live' }, { json: () => resolve() });
-        });
-        // Jalankan scraping
-        app.handle({ method: 'POST', url: '/api/start-scraping-all' }, { json: () => {} });
-    }
-}
-doAutorecover();
-
-// Start scraping and enable monitoring
+// Start scraping: attach listeners to existing connections, move to connected
 app.post('/api/start-scraping-all', (req, res) => {
     if (liveAccounts.length === 0) {
         return res.status(400).json({ error: 'No live accounts to scrape.' });
     }
-    isMonitoring = true; // Enable monitoring
+    isMonitoring = true;
     autorecover = true;
     fs.writeFileSync(autorecoverFile, 'on');
-
     liveAccounts.forEach(username => {
-        const connection = new WebcastPushConnection(username);
-        reconnectAttempts[username] = 0;
-
-        function setupListeners(conn, uname) {
-            // Reset koneksi yang ada untuk username ini
-            if (conn._events) {
-                conn.removeAllListeners('gift');
-                conn.removeAllListeners('roomUser');
-                conn.removeAllListeners('streamData');
-                conn.removeAllListeners('disconnected');
-            }
-
-            // Debug info untuk gift
-            console.log(`Setting up listeners for ${uname}`);
-            
-            conn.on('gift', (giftData) => {
-                // Hanya proses jika giftType !== 1 atau (giftType === 1 dan repeatEnd === true)
-                if (giftData.giftType === 1 && !giftData.repeatEnd) {
-                    // Streak in progress, abaikan
-                    return;
-                }
-                if (!giftData.msgId) return; // abaikan jika tidak ada msgId
-                if (processedGiftMsgIds[uname]?.has(giftData.msgId)) {
-                    console.log(`Duplicate gift event for ${uname}: msgId=${giftData.msgId}`);
-                    return;
-                }
-                processedGiftMsgIds[uname]?.add(giftData.msgId);
-
-                // Debug info
-                console.log(`Gift received for ${uname}:`, {
-                    gifter: giftData.uniqueId || giftData.nickname || 'unknown',
-                    giftName: giftData.giftName,
-                    count: giftData.repeatCount || 1,
-                    diamond: giftData.diamondCount || 0,
-                    timestamp: giftData.timestamp || Date.now(),
-                    msgId: giftData.msgId,
-                    groupId: giftData.groupId,
-                    giftType: giftData.giftType,
-                    repeatEnd: giftData.repeatEnd
-                });
-
-                const eventTimestamp = giftData.timestamp || Date.now();
-                const gifter = giftData.uniqueId || giftData.nickname || 'unknown';
-                const giftName = giftData.giftName;
-                const count = giftData.repeatCount || 1;
-                const diamond = giftData.diamondCount || 0;
-
-                updateLiveData(uname, {
-                    gift: {
-                        name: giftName,
-                        diamond: diamond * count,
-                        gifter: gifter,
-                        timestamp: eventTimestamp,
-                        count: count
-                    }
-                });
-            });
-            conn.on('roomUser', (data) => {
-                if (typeof data.viewerCount === 'number') {
-                    updateLiveData(uname, { viewer: data.viewerCount });
-                }
-            });
-            // Fallback: also listen for streamData as before
-            conn.on('streamData', (data) => {
-                if (typeof data.viewerCount === 'number') {
-                    updateLiveData(uname, { viewer: data.viewerCount });
-                } else if (typeof data.viewer === 'number') {
-                    updateLiveData(uname, { viewer: data.viewer });
-                }
-            });
-            conn.on('disconnected', async () => {
-                finalizeLiveData(uname);
-                const logMsg = `${new Date().toISOString()} - Disconnected from ${uname}. Checking status...\n`;
-                fs.appendFileSync(logFilePath, logMsg);
-                console.log(logMsg);
-                let stillLive = false;
-                try {
-                    stillLive = await isAccountStillLive(uname);
-                } catch (e) {}
-                if (stillLive && reconnectAttempts[uname] < 2) {
-                    reconnectAttempts[uname]++;
-                    const retryMsg = `${new Date().toISOString()} - ${uname} still live, reconnect attempt ${reconnectAttempts[uname]}...\n`;
-                    fs.appendFileSync(logFilePath, retryMsg);
-                    console.log(retryMsg);
-                    setTimeout(() => {
-                        const newConn = new WebcastPushConnection(uname);
-                        setupListeners(newConn, uname);
-                        newConn.connect();
-                    }, 30000); // 30 seconds
-                } else {
-                    // Remove from connected, add to offline
-                    connectedAccounts = connectedAccounts.filter(u => u !== uname);
-                    if (!offlineAccounts.includes(uname)) offlineAccounts.push(uname);
-                    const offMsg = `${new Date().toISOString()} - ${uname} moved to offline after disconnect.\n`;
-                    fs.appendFileSync(logFilePath, offMsg);
-                    console.log(offMsg);
-                }
-            });
+        let connection = activeConnections[username];
+        // Jangan buat koneksi baru, gunakan hasil check-live
+        if (!connection) {
+            // Fallback: jika tidak ada, baru buat koneksi
+            connection = new WebcastPushConnection(username);
+            activeConnections[username] = connection;
         }
-
-        connection.connect()
-            .then((state) => {
-                if (!connectedAccounts.includes(username)) {
-                    connectedAccounts.push(username);
-                    const logMessage = `${new Date().toISOString()} - Connected to ${username}'s live stream.\n`;
-                    fs.appendFileSync(logFilePath, logMessage);
-                    console.log(logMessage);
-                }
-                initLiveData(username, state);
-                setupListeners(connection, username);
-            })
-            .catch((error) => {
-                console.error(`Error connecting to ${username}:`, error.message);
-            });
+        reconnectAttempts[username] = 0;
+        // Attach listeners only if not already attached
+        if (!listenersAttached[username]) {
+            setupListeners({ conn: connection, uname: username });
+            listenersAttached[username] = true;
+        }
+        // Move to connected jika belum
+        if (!connectedAccounts.includes(username)) {
+            connectedAccounts.push(username);
+            const logMessage = `${new Date().toISOString()} - Connected to ${username}'s live stream.\n`;
+            fs.appendFileSync(logFilePath, logMessage);
+            console.log(logMessage);
+        }
+        // Jika belum ada data, baru connect dan init data
+        if (!liveDataStore[username]) {
+            // Jangan connect lagi jika sudah connect dari check-live
+            if (!connection.isConnected) {
+                connection.connect()
+                    .then((state) => {
+                        initLiveData(username, state);
+                    })
+                    .catch((error) => {
+                        console.error(`Error connecting to ${username}:`, error.message);
+                    });
+            } else {
+                // Sudah connect, langsung init data
+                initLiveData(username, connection.state || {});
+            }
+        }
     });
-
     res.json({ message: 'Scraping started and monitoring enabled.' });
 });
 
@@ -373,11 +170,18 @@ app.post('/api/stop-monitoring', (req, res) => {
 
 // Stop and reset scraping, disconnect all, set all offline, save data
 app.post('/api/stop-scraping-and-reset', async (req, res) => {
-    // 1. Save all data
+    // 1. Matikan autorecover di awal
+    autorecover = false;
+    if (fs.existsSync(autorecoverFile)) fs.unlinkSync(autorecoverFile);
+
+    // 1b. Matikan autochecker jika aktif
+    stopAutochecker();
+
+    // 2. Save all data
     saveLiveDataToFile();
     saveLiveDataToCSV();
 
-    // 2. Disconnect all connections
+    // 3. Disconnect all connections
     for (const uname in activeConnections) {
         try {
             activeConnections[uname].disconnect && activeConnections[uname].disconnect();
@@ -387,7 +191,7 @@ app.post('/api/stop-scraping-and-reset', async (req, res) => {
     if (monitorLiveInterval) clearInterval(monitorLiveInterval);
     if (monitorConnectedInterval) clearInterval(monitorConnectedInterval);
 
-    // 3. Set all akun ke offline, kosongkan liveAccounts, connectedAccounts, dsb
+    // 4. Set all akun ke offline, kosongkan liveAccounts, connectedAccounts, dsb
     let usernames = [];
     try {
         usernames = fs.readFileSync(accountFilePath, 'utf-8').split('\n').filter(Boolean);
@@ -397,9 +201,7 @@ app.post('/api/stop-scraping-and-reset', async (req, res) => {
     connectedAccounts = [];
     errorAccounts = [];
     isMonitoring = false;
-    autorecover = false;
-    if (fs.existsSync(autorecoverFile)) fs.unlinkSync(autorecoverFile);
-    // 4. Reset liveDataStore (jika ingin data baru, atau biarkan untuk histori)
+    // 5. Reset liveDataStore (jika ingin data baru, atau biarkan untuk histori)
     // Object.keys(liveDataStore).forEach(k => delete liveDataStore[k]);
     res.json({ message: 'All monitoring stopped, all accounts set to offline, data saved, monitoring off.' });
 });
@@ -430,17 +232,26 @@ function formatDateToGMT7(date) {
 }
 
 function initLiveData(username, metadata) {
+    // Ambil waktu mulai dari metadata TikTok jika ada, fallback ke waktu koneksi
+    let timestampStart = null;
+    if (metadata && metadata.create_time) {
+        // TikTok API: create_time = epoch detik UTC
+        timestampStart = formatDateToGMT7(new Date(metadata.create_time * 1000));
+    } else {
+        timestampStart = formatDateToGMT7(new Date());
+    }
     liveDataStore[username] = {
         username,
         room_id: metadata && metadata.roomId ? metadata.roomId : null,
-        timestamp_start: metadata && metadata.create_time ? formatDateToGMT7(new Date(metadata.create_time * 1000)) : formatDateToGMT7(new Date()),
+        timestamp_start: timestampStart,
         viewer: 0,
         peak_viewer: 0,
         gifts: [],
         total_diamond: 0,
         leaderboard: {},
         timestamp_end: null,
-        duration: null
+        duration: null,
+        status: 'live' // Tambahkan status
     };
     processedGiftMsgIds[username] = new Set();
     saveLiveDataToFile();
@@ -494,6 +305,7 @@ function finalizeLiveData(username) {
     const minutes = Math.floor(durationMs / 60000);
     const seconds = Math.floor((durationMs % 60000) / 1000);
     liveDataStore[username].duration = `${minutes}m ${seconds}s`;
+    liveDataStore[username].status = 'finalized'; // Update status
     saveLiveDataToFile();
     emitLiveDataFinalize(username);
     saveLiveDataToCSV(); // Save CSV on finalize
@@ -520,10 +332,6 @@ const io = new Server(server, {
 server.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });
-
-// Start monitoring live accounts on server start
-monitorLiveAccounts();
-monitorConnectedAccounts();
 
 // Periodic save every 15 minutes
 setInterval(() => {
@@ -581,6 +389,16 @@ app.get('/api/save-and-download-csv', (req, res) => {
     res.download(csvFilePath, 'live_data.csv');
 });
 
+// Status endpoint untuk frontend
+app.get('/api/status', (req, res) => {
+    res.json({
+        autochecker: typeof autocheckerActive !== 'undefined' ? autocheckerActive : false,
+        monitoring: typeof isMonitoring !== 'undefined' ? isMonitoring : false,
+        scraping: typeof isMonitoring !== 'undefined' && isMonitoring && connectedAccounts.length > 0,
+        autorecover: typeof autorecover !== 'undefined' ? autorecover : false
+    });
+});
+
 // Global error handler untuk mencegah server crash
 process.on('uncaughtException', (err) => {
     const msg = `[uncaughtException] ${new Date().toISOString()} - ${err.stack || err}`;
@@ -595,3 +413,210 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error(msg);
     // Jangan exit, biarkan server tetap jalan
 });
+
+// --- AUTORECOVER PATCH ---
+// On server start, if autorecover is on, trigger check-live and start-scraping
+async function doAutorecover() {
+    if (autorecover) {
+        fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] Autorecover ON: starting check-live and scraping\n`);
+        // Jalankan check-live
+        await new Promise(resolve => {
+            app.handle({ method: 'POST', url: '/api/check-live' }, { json: () => resolve() });
+        });
+        // Jalankan scraping
+        app.handle({ method: 'POST', url: '/api/start-scraping-all' }, { json: () => {} });
+    }
+}
+doAutorecover();
+
+// --- FINALIZE HANGING LIVE SESSIONS ON STARTUP ---
+function finalizeHangingLiveSessionsOnStartup() {
+    let json = {};
+    try {
+        if (fs.existsSync(liveDataFile)) {
+            json = JSON.parse(fs.readFileSync(liveDataFile, 'utf-8'));
+        }
+    } catch (e) {
+        console.error('Failed to read/parse live_data.json:', e.message);
+        return;
+    }
+    const usernamesToCheck = [];
+    for (const username in json) {
+        const session = json[username];
+        if (session && !session.timestamp_end) {
+            usernamesToCheck.push(username);
+        }
+    }
+    if (usernamesToCheck.length === 0) return;
+    // Cek status live untuk setiap akun yang sesi-nya masih "live"
+    const checkAndFinalize = async () => {
+        for (const username of usernamesToCheck) {
+            // Cek apakah akun masih live
+            const connection = new WebcastPushConnection(username);
+            try {
+                await connection.connect();
+                // Masih live, biarkan saja, akan lanjut monitoring
+                connection.disconnect && connection.disconnect();
+            } catch (err) {
+                // Sudah offline, finalize sesi
+                finalizeLiveData(username);
+            }
+        }
+    };
+    checkAndFinalize();
+}
+
+// Jalankan saat startup
+finalizeHangingLiveSessionsOnStartup();
+
+// Fungsi untuk setup listeners pada koneksi TikTok
+function setupListeners({ conn, uname }) {
+    // Reset listeners jika sudah ada
+    if (conn._events) {
+        conn.removeAllListeners('gift');
+        conn.removeAllListeners('roomUser');
+        conn.removeAllListeners('streamData');
+        conn.removeAllListeners('disconnected');
+    }
+    // Gift event
+    conn.on('gift', (giftData) => {
+        // Hanya proses jika giftType !== 1 atau (giftType === 1 dan repeatEnd === true)
+        if (giftData.giftType === 1 && !giftData.repeatEnd) return;
+        if (!giftData.msgId) return;
+        if (processedGiftMsgIds[uname]?.has(giftData.msgId)) return;
+        processedGiftMsgIds[uname]?.add(giftData.msgId);
+        const eventTimestamp = giftData.timestamp || Date.now();
+        const gifter = giftData.uniqueId || giftData.nickname || 'unknown';
+        const giftName = giftData.giftName;
+        const count = giftData.repeatCount || 1;
+        const diamond = giftData.diamondCount || 0;
+        updateLiveData(uname, {
+            gift: {
+                name: giftName,
+                diamond: diamond * count,
+                gifter: gifter,
+                timestamp: eventTimestamp,
+                count: count
+            }
+        });
+    });
+    // Viewer update
+    conn.on('roomUser', (data) => {
+        if (typeof data.viewerCount === 'number') {
+            updateLiveData(uname, { viewer: data.viewerCount });
+        }
+    });
+    // Fallback: streamData
+    conn.on('streamData', (data) => {
+        if (typeof data.viewerCount === 'number') {
+            updateLiveData(uname, { viewer: data.viewerCount });
+        } else if (typeof data.viewer === 'number') {
+            updateLiveData(uname, { viewer: data.viewer });
+        }
+    });
+    // Disconnect/reconnect logic
+    conn.on('disconnected', async () => {
+        finalizeLiveData(uname);
+        const logMsg = `${new Date().toISOString()} - Disconnected from ${uname}. Checking status...\n`;
+        fs.appendFileSync(logFilePath, logMsg);
+        console.log(logMsg);
+        let stillLive = false;
+        try {
+            stillLive = await (async function isAccountStillLive(username) {
+                const connection = new WebcastPushConnection(username);
+                try {
+                    await connection.connect();
+                    return true;
+                } catch (error) {
+                    return false;
+                }
+            })(uname);
+        } catch (e) {}
+        if (stillLive && reconnectAttempts[uname] < 2) {
+            reconnectAttempts[uname]++;
+            const retryMsg = `${new Date().toISOString()} - ${uname} still live, reconnect attempt ${reconnectAttempts[uname]}...\n`;
+            fs.appendFileSync(logFilePath, retryMsg);
+            console.log(retryMsg);
+            setTimeout(() => {
+                const newConn = new WebcastPushConnection(uname);
+                activeConnections[uname] = newConn;
+                setupListeners({ conn: newConn, uname });
+                newConn.connect();
+            }, 30000); // 30 seconds
+        } else {
+            connectedAccounts = connectedAccounts.filter(u => u !== uname);
+            if (!offlineAccounts.includes(uname)) offlineAccounts.push(uname);
+            const offMsg = `${new Date().toISOString()} - ${uname} moved to offline after disconnect.\n`;
+            fs.appendFileSync(logFilePath, offMsg);
+            console.log(offMsg);
+        }
+    });
+}
+
+// --- AUTOCHECKER LOGIC ---
+let autocheckerInterval = null;
+let autocheckerActive = false;
+function startAutochecker() {
+    if (autocheckerInterval) return; // Already running
+    autocheckerActive = true;
+    io.emit('autoCheckerStatus', { on: true });
+    autocheckerInterval = setInterval(async () => {
+        if (offlineAccounts.length === 0) {
+            stopAutochecker();
+            return;
+        }
+        let newlyLive = [];
+        for (const username of [...offlineAccounts]) {
+            let connection = activeConnections[username];
+            if (!connection) {
+                connection = new WebcastPushConnection(username);
+                activeConnections[username] = connection;
+            }
+            try {
+                await connection.connect();
+                if (!liveAccounts.includes(username)) liveAccounts.push(username);
+                // Remove from offline
+                offlineAccounts = offlineAccounts.filter(u => u !== username);
+                newlyLive.push(username);
+                // If monitoring/scraping is active, auto-attach listeners and start scraping for this account
+                if (isMonitoring && !listenersAttached[username]) {
+                    setupListeners({ conn: connection, uname: username });
+                    listenersAttached[username] = true;
+                    if (!connectedAccounts.includes(username)) connectedAccounts.push(username);
+                    // Optionally, init live data if not present
+                    if (!liveDataStore[username]) {
+                        initLiveData(username, connection.state || {});
+                    }
+                }
+                io.emit('autoCheckerStatus', { on: true });
+            } catch (err) {
+                // Remain offline
+            }
+        }
+        // Always broadcast status update
+        io.emit('statusUpdate', {
+            autochecker: autocheckerActive,
+            monitoring: isMonitoring,
+            scraping: isMonitoring, // If you have a separate scraping flag, use it
+            autorecover: autorecover
+        });
+        // If all are live, stop autochecker
+        if (offlineAccounts.length === 0) {
+            stopAutochecker();
+        }
+    }, 60 * 1000); // 1 minute
+}
+function stopAutochecker() {
+    if (autocheckerInterval) {
+        clearInterval(autocheckerInterval);
+        autocheckerInterval = null;
+    }
+    autocheckerActive = false;
+    io.emit('autoCheckerStatus', { on: false });
+    io.emit('statusUpdate', {
+        autochecker: autocheckerActive,
+        monitoring: isMonitoring,
+        scraping: isMonitoring, // If you have a separate scraping flag, use it
+        autorecover: autorecover
+    });
+}
