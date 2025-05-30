@@ -141,7 +141,6 @@
     <h1>TikTok Live Scraper</h1>
 
     <div id="statusBar" style="margin-bottom:12px;display:flex;gap:16px;align-items:center;font-weight:bold;font-size:15px;"></div>
-    <div id="autocheckerIndicator" style="margin-bottom:10px;font-weight:bold;color:#007b00;display:none;">autochecker ON</div>
 
     <button id="checkStatus">Check Account Status</button>
     <button id="startScraping" disabled>Start Scraping</button>
@@ -181,11 +180,6 @@
                 <span style="color:${status.autorecover?'#007b00':'#b00'}">Autorecover: <b>${status.autorecover?'ON':'OFF'}</b></span>
             `;
         }
-        function pollStatusBar() {
-            fetch('/api/status').then(r=>r.json()).then(updateStatusBar);
-        }
-        setInterval(pollStatusBar, 2000);
-        pollStatusBar();
 
         let liveAccounts = [];
         let offlineAccounts = [];
@@ -197,19 +191,8 @@
 
         // --- SOCKET.IO CLIENT ---
         const socket = io();
-        // Listen autochecker status
-        const autocheckerIndicator = document.getElementById('autocheckerIndicator');
-        socket.on('autoCheckerStatus', ({ on }) => {
-            if (on) {
-                autocheckerIndicator.style.display = 'block';
-                autocheckerIndicator.textContent = 'autochecker ON';
-                autocheckerIndicator.style.color = '#007b00';
-            } else {
-                autocheckerIndicator.style.display = 'block';
-                autocheckerIndicator.textContent = 'autochecker OFF';
-                autocheckerIndicator.style.color = '#b00';
-            }
-        });
+        // Update status bar from server
+        socket.on('statusUpdate', updateStatusBar);
         // On live data update, update or add the card
         socket.on('liveDataUpdate', ({ username, data }) => {
             window._liveData = window._liveData || {};

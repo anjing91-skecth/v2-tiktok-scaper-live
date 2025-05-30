@@ -148,6 +148,7 @@ app.post('/api/start-scraping-all', (req, res) => {
             }
         }
     });
+    emitStatusUpdate();
     res.json({ message: 'Scraping started and monitoring enabled.' });
 });
 
@@ -165,6 +166,7 @@ app.post('/api/stop-monitoring', (req, res) => {
     activeConnections = {};
     if (monitorLiveInterval) clearInterval(monitorLiveInterval);
     if (monitorConnectedInterval) clearInterval(monitorConnectedInterval);
+    emitStatusUpdate();
     res.json({ message: 'Monitoring stopped.' });
 });
 
@@ -203,6 +205,7 @@ app.post('/api/stop-scraping-and-reset', async (req, res) => {
     isMonitoring = false;
     // 5. Reset liveDataStore (jika ingin data baru, atau biarkan untuk histori)
     // Object.keys(liveDataStore).forEach(k => delete liveDataStore[k]);
+    emitStatusUpdate();
     res.json({ message: 'All monitoring stopped, all accounts set to offline, data saved, monitoring off.' });
 });
 
@@ -389,16 +392,6 @@ app.get('/api/save-and-download-csv', (req, res) => {
     res.download(csvFilePath, 'live_data.csv');
 });
 
-// Status endpoint untuk frontend
-app.get('/api/status', (req, res) => {
-    res.json({
-        autochecker: typeof autocheckerActive !== 'undefined' ? autocheckerActive : false,
-        monitoring: typeof isMonitoring !== 'undefined' ? isMonitoring : false,
-        scraping: typeof isMonitoring !== 'undefined' && isMonitoring && connectedAccounts.length > 0,
-        autorecover: typeof autorecover !== 'undefined' ? autorecover : false
-    });
-});
-
 // Global error handler untuk mencegah server crash
 process.on('uncaughtException', (err) => {
     const msg = `[uncaughtException] ${new Date().toISOString()} - ${err.stack || err}`;
@@ -424,7 +417,7 @@ async function doAutorecover() {
             app.handle({ method: 'POST', url: '/api/check-live' }, { json: () => resolve() });
         });
         // Jalankan scraping
-        app.handle({ method: 'POST', url: '/api/start-scraping-all' }, { json: () => {} });
+        app.handle({ method: 'POST', url: '/api/start-scraping-all' }, { json: () => { emitStatusUpdate(); } });
     }
 }
 doAutorecover();
@@ -560,6 +553,7 @@ function startAutochecker() {
     if (autocheckerInterval) return; // Already running
     autocheckerActive = true;
     io.emit('autoCheckerStatus', { on: true });
+    emitStatusUpdate();
     autocheckerInterval = setInterval(async () => {
         if (offlineAccounts.length === 0) {
             stopAutochecker();
@@ -583,7 +577,6 @@ function startAutochecker() {
                     setupListeners({ conn: connection, uname: username });
                     listenersAttached[username] = true;
                     if (!connectedAccounts.includes(username)) connectedAccounts.push(username);
-                    // Optionally, init live data if not present
                     if (!liveDataStore[username]) {
                         initLiveData(username, connection.state || {});
                     }
@@ -593,14 +586,7 @@ function startAutochecker() {
                 // Remain offline
             }
         }
-        // Always broadcast status update
-        io.emit('statusUpdate', {
-            autochecker: autocheckerActive,
-            monitoring: isMonitoring,
-            scraping: isMonitoring, // If you have a separate scraping flag, use it
-            autorecover: autorecover
-        });
-        // If all are live, stop autochecker
+        emitStatusUpdate();
         if (offlineAccounts.length === 0) {
             stopAutochecker();
         }
@@ -613,10 +599,15 @@ function stopAutochecker() {
     }
     autocheckerActive = false;
     io.emit('autoCheckerStatus', { on: false });
+    emitStatusUpdate();
+}
+
+// Emit status update to all clients
+function emitStatusUpdate() {
     io.emit('statusUpdate', {
-        autochecker: autocheckerActive,
-        monitoring: isMonitoring,
-        scraping: isMonitoring, // If you have a separate scraping flag, use it
-        autorecover: autorecover
+        autochecker: typeof autocheckerActive !== 'undefined' ? autocheckerActive : false,
+        monitoring: typeof isMonitoring !== 'undefined' ? isMonitoring : false,
+        scraping: typeof isMonitoring !== 'undefined' && isMonitoring && connectedAccounts.length > 0,
+        autorecover: typeof autorecover !== 'undefined' ? autorecover : false
     });
 }
