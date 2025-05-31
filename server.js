@@ -315,6 +315,12 @@ const io = new Server(server, {
     cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
+// Emit status & account status to new socket.io client on connect
+io.on('connection', (socket) => {
+    emitStatusUpdate();
+    emitAccountStatusUpdate();
+});
+
 server.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });
