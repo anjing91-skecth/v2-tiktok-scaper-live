@@ -557,7 +557,7 @@ function startAutochecker() {
     autocheckerActive = true;
     io.emit('autoCheckerStatus', { on: true });
     emitStatusUpdate();
-    console.log(`[${new Date().toISOString()}] Autochecker started (interval 5 detik)`);
+    console.log(`[${new Date().toISOString()}] Autochecker started (interval 15 menit)`);
     autocheckerInterval = setInterval(async () => {
         try {
             if (offlineAccounts.length === 0) {
@@ -622,7 +622,7 @@ function startAutochecker() {
         } catch (e) {
             console.error(`[${new Date().toISOString()}] Autochecker FATAL ERROR:`, e);
         }
-    }, 5000); // 5 detik
+    }, 15 * 60 * 1000); // 15 menit
 }
 function stopAutochecker() {
     if (autocheckerInterval) {
