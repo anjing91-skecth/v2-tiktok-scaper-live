@@ -7,6 +7,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 
 let autorecover = false;
+let isMonitoring = false;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -104,51 +105,33 @@ app.post('/api/check-live', async (req, res) => {
 
 // Start scraping: attach listeners to existing connections, move to connected
 app.post('/api/start-scraping-all', (req, res) => {
-    if (liveAccounts.length === 0) {
-        return res.status(400).json({ error: 'No live accounts to scrape.' });
-    }
+    // PATCH: Jangan return error jika liveAccounts.length === 0
+    // isMonitoring harus tetap true meskipun tidak ada akun live
     isMonitoring = true;
     autorecover = true;
     fs.writeFileSync(autorecoverFile, 'on');
+    // Tetap jalankan autochecker jika ada akun offline
+    if (offlineAccounts.length > 0) {
+        startAutochecker();
+    }
+    // Hanya attach listener jika ada akun live
     liveAccounts.forEach(username => {
         let connection = activeConnections[username];
-        // Jangan buat koneksi baru, gunakan hasil check-live
         if (!connection) {
-            // Fallback: jika tidak ada, baru buat koneksi
             connection = new WebcastPushConnection(username);
             activeConnections[username] = connection;
         }
-        reconnectAttempts[username] = 0;
-        // Attach listeners only if not already attached
         if (!listenersAttached[username]) {
             setupListeners({ conn: connection, uname: username });
             listenersAttached[username] = true;
         }
-        // Move to connected jika belum
-        if (!connectedAccounts.includes(username)) {
-            connectedAccounts.push(username);
-            const logMessage = `${new Date().toISOString()} - Connected to ${username}'s live stream.\n`;
-            fs.appendFileSync(logFilePath, logMessage);
-            console.log(logMessage);
-        }
-        // Jika belum ada data, baru connect dan init data
+        if (!connectedAccounts.includes(username)) connectedAccounts.push(username);
         if (!liveDataStore[username]) {
-            // Jangan connect lagi jika sudah connect dari check-live
-            if (!connection.isConnected) {
-                connection.connect()
-                    .then((state) => {
-                        initLiveData(username, state);
-                    })
-                    .catch((error) => {
-                        console.error(`Error connecting to ${username}:`, error.message);
-                    });
-            } else {
-                // Sudah connect, langsung init data
-                initLiveData(username, connection.state || {});
-            }
+            initLiveData(username, connection.state || {});
         }
     });
     emitStatusUpdate();
+    emitAccountStatusUpdate();
     res.json({ message: 'Scraping started and monitoring enabled.' });
 });
 
@@ -471,6 +454,10 @@ function setupListeners({ conn, uname }) {
         conn.removeAllListeners('streamData');
         conn.removeAllListeners('disconnected');
     }
+    // Log pemasangan event listener
+    const logMsg = `${new Date().toISOString()} - [LISTENER] Event listeners attached for ${uname}\n`;
+    fs.appendFileSync(logFilePath, logMsg);
+    console.log(logMsg);
     // Gift event
     conn.on('gift', (giftData) => {
         // Hanya proses jika giftType !== 1 atau (giftType === 1 dan repeatEnd === true)
@@ -525,6 +512,7 @@ function setupListeners({ conn, uname }) {
                 }
             })(uname);
         } catch (e) {}
+        let prevStatus = liveAccounts.includes(uname) ? 'online' : 'offline';
         if (stillLive && reconnectAttempts[uname] < 2) {
             reconnectAttempts[uname]++;
             const retryMsg = `${new Date().toISOString()} - ${uname} still live, reconnect attempt ${reconnectAttempts[uname]}...\n`;
@@ -542,8 +530,23 @@ function setupListeners({ conn, uname }) {
             const offMsg = `${new Date().toISOString()} - ${uname} moved to offline after disconnect.\n`;
             fs.appendFileSync(logFilePath, offMsg);
             console.log(offMsg);
+            logStatusChange(uname, prevStatus, 'offline');
+            emitAccountStatusUpdate(); // Emit update ke frontend agar kartu user hilang dan pindah ke offline
+            // Patch: jika monitoring masih aktif dan autochecker belum aktif, jalankan autochecker
+            if (isMonitoring && !autocheckerInterval) {
+                startAutochecker();
+            }
         }
     });
+}
+
+// --- LOG STATUS CHANGE ---
+function logStatusChange(username, fromStatus, toStatus) {
+    if (fromStatus !== toStatus) {
+        const msg = `${new Date().toISOString()} - [STATUS] ${username} status changed: ${fromStatus} -> ${toStatus}\n`;
+        fs.appendFileSync(logFilePath, msg);
+        console.log(msg);
+    }
 }
 
 // --- AUTOCHECKER LOGIC ---
@@ -554,43 +557,72 @@ function startAutochecker() {
     autocheckerActive = true;
     io.emit('autoCheckerStatus', { on: true });
     emitStatusUpdate();
+    console.log(`[${new Date().toISOString()}] Autochecker started (interval 5 detik)`);
     autocheckerInterval = setInterval(async () => {
-        if (offlineAccounts.length === 0) {
-            stopAutochecker();
-            return;
-        }
-        let newlyLive = [];
-        for (const username of [...offlineAccounts]) {
-            let connection = activeConnections[username];
-            if (!connection) {
-                connection = new WebcastPushConnection(username);
-                activeConnections[username] = connection;
+        try {
+            if (offlineAccounts.length === 0) {
+                console.log(`[${new Date().toISOString()}] Autochecker: Tidak ada akun offline, autochecker dihentikan.`);
+                stopAutochecker();
+                return;
             }
-            try {
-                await connection.connect();
-                if (!liveAccounts.includes(username)) liveAccounts.push(username);
-                // Remove from offline
-                offlineAccounts = offlineAccounts.filter(u => u !== username);
-                newlyLive.push(username);
-                // If monitoring/scraping is active, auto-attach listeners and start scraping for this account
-                if (isMonitoring && !listenersAttached[username]) {
+            const accountsToCheck = [...offlineAccounts];
+            offlineAccounts = [];
+            let newlyLive = [];
+            let stillOffline = [];
+            let errorAccountsLocal = [];
+            for (const username of accountsToCheck) {
+                // Selalu buat koneksi baru untuk pengecekan fresh
+                if (activeConnections[username]) {
+                    try {
+                        activeConnections[username].disconnect && activeConnections[username].disconnect();
+                    } catch (e) {
+                        console.error(`[${new Date().toISOString()}] Autochecker: Error disconnecting old connection for ${username}:`, e);
+                    }
+                }
+                let connection = new WebcastPushConnection(username);
+                activeConnections[username] = connection;
+                let prevStatus = liveAccounts.includes(username) ? 'online' : 'offline';
+                try {
+                    await connection.connect();
+                    if (!liveAccounts.includes(username)) liveAccounts.push(username);
+                    newlyLive.push(username);
+                    logStatusChange(username, prevStatus, 'online');
+                    // PATCH: Pastikan listeners langsung dipasang walaupun listenersAttached sudah true (force re-attach)
                     setupListeners({ conn: connection, uname: username });
                     listenersAttached[username] = true;
                     if (!connectedAccounts.includes(username)) connectedAccounts.push(username);
                     if (!liveDataStore[username]) {
                         initLiveData(username, connection.state || {});
                     }
+                    console.log(`[${new Date().toISOString()}] Autochecker: Scraping started for ${username} (monitoring ON)`);
+                } catch (err) {
+                    if (err.message && err.message.includes("isn't online")) {
+                        stillOffline.push(username);
+                        logStatusChange(username, prevStatus, 'offline');
+                        console.log(`[${new Date().toISOString()}] Autochecker: ${username} is OFFLINE.`);
+                    } else {
+                        errorAccountsLocal.push(username);
+                        logStatusChange(username, prevStatus, 'error');
+                        console.error(`[${new Date().toISOString()}] Autochecker ERROR: ${username} =>`, err.message || err);
+                    }
                 }
-                io.emit('autoCheckerStatus', { on: true });
-            } catch (err) {
-                // Remain offline
             }
+            // Update global offlineAccounts dan errorAccounts
+            offlineAccounts = stillOffline;
+            errorAccounts = errorAccountsLocal;
+            emitStatusUpdate();
+            // Emit accountStatusUpdate hanya jika ada akun yang baru live
+            if (newlyLive.length > 0) {
+                emitAccountStatusUpdate();
+            }
+            if (offlineAccounts.length === 0) {
+                console.log(`[${new Date().toISOString()}] Autochecker: Semua akun sudah live, autochecker dihentikan.`);
+                stopAutochecker();
+            }
+        } catch (e) {
+            console.error(`[${new Date().toISOString()}] Autochecker FATAL ERROR:`, e);
         }
-        emitStatusUpdate();
-        if (offlineAccounts.length === 0) {
-            stopAutochecker();
-        }
-    }, 60 * 1000); // 1 minute
+    }, 5000); // 5 detik
 }
 function stopAutochecker() {
     if (autocheckerInterval) {
@@ -607,7 +639,17 @@ function emitStatusUpdate() {
     io.emit('statusUpdate', {
         autochecker: typeof autocheckerActive !== 'undefined' ? autocheckerActive : false,
         monitoring: typeof isMonitoring !== 'undefined' ? isMonitoring : false,
-        scraping: typeof isMonitoring !== 'undefined' && isMonitoring && connectedAccounts.length > 0,
+        // PATCH: scraping harus ON jika isMonitoring true, meskipun connectedAccounts.length === 0
+        scraping: typeof isMonitoring !== 'undefined' && isMonitoring,
         autorecover: typeof autorecover !== 'undefined' ? autorecover : false
+    });
+}
+
+// Emit account status update to all clients
+function emitAccountStatusUpdate() {
+    io.emit('accountStatusUpdate', {
+        online: liveAccounts,
+        offline: offlineAccounts,
+        error: errorAccounts
     });
 }

@@ -16,7 +16,7 @@
             font-size: 16px;
             cursor: pointer;
         }
-        #onlineUsers, #offlineUsers {
+        #onlineUsers, #offlineUsers, #errorUsers {
             margin-top: 20px;
         }
         #onlineCards {
@@ -102,7 +102,7 @@
             font-weight: bold;
             margin-left: 4px;
         }
-        #offlineList {
+        #offlineList, #errorList {
             list-style-type: none;
             padding: 0;
         }
@@ -148,6 +148,11 @@
     <button id="editUserList">Edit Username List</button>
     <button id="downloadData">Save and Download</button>
 
+    <div id="errorUsers">
+        <h2 style="color:#b00">Error Users</h2>
+        <ul id="errorList"></ul>
+    </div>
+
     <div id="onlineUsers">
         <h2>Online Users</h2>
         <div id="onlineCards"></div>
@@ -183,6 +188,7 @@
 
         let liveAccounts = [];
         let offlineAccounts = [];
+        let errorAccounts = [];
         let isMonitoring = false;
         let expandedCards = {};
         const loadingOverlay = document.getElementById('loadingOverlay');
@@ -191,8 +197,13 @@
 
         // --- SOCKET.IO CLIENT ---
         const socket = io();
+        // Track scraping status to avoid double trigger
+        let isScraping = false;
         // Update status bar from server
-        socket.on('statusUpdate', updateStatusBar);
+        socket.on('statusUpdate', status => {
+            updateStatusBar(status);
+            isScraping = !!status.scraping;
+        });
         // On live data update, update or add the card
         socket.on('liveDataUpdate', ({ username, data }) => {
             window._liveData = window._liveData || {};
@@ -205,13 +216,97 @@
             window._liveData[username] = data;
             renderLiveDataCards(window._liveData);
         });
+        // Listen for realtime account status update (online, offline, error)
+        socket.on('accountStatusUpdate', ({ online, offline, error }) => {
+            renderAccountStatusLists(online, offline, error);
+            liveAccounts = online || [];
+            // PATCH: Pastikan window._liveData hanya berisi akun yang online
+            function cleanLiveDataForOnline() {
+                if (!window._liveData) return;
+                const onlineSet = new Set(liveAccounts);
+                Object.keys(window._liveData).forEach(username => {
+                    if (!onlineSet.has(username)) {
+                        delete window._liveData[username];
+                    }
+                });
+            }
+            cleanLiveDataForOnline();
+            renderLiveDataCards(window._liveData || {});
+            // Tombol startScraping hanya aktif jika monitoring belum jalan
+            if (!isMonitoring && liveAccounts.length > 0) {
+                startScrapingButton.disabled = false;
+            } else {
+                startScrapingButton.disabled = true;
+            }
+            // Auto-trigger scraping if monitoring ON, scraping OFF, and there are live accounts
+            if (isMonitoring && !isScraping && liveAccounts.length > 0) {
+                isScraping = true; // Prevent double trigger
+                fetch('/api/start-scraping-all', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log('Auto-scraping triggered:', data.message);
+                    })
+                    .catch(error => console.error('Auto-scraping error:', error));
+            }
+        });
+        // Pastikan event listener socket.io selalu aktif saat scraping ON
+        function setMonitoringStatus(status) {
+            isMonitoring = status;
+            // Tidak perlu pasang ulang event listener, sudah aktif sejak awal
+        }
 
         // --- UI RENDERING ---
         function renderLiveDataCards(liveData) {
             const onlineCards = document.getElementById('onlineCards');
             onlineCards.innerHTML = '';
+            // Hanya render kartu untuk akun yang masih online (dan ada datanya)
+            const onlineSet = new Set(liveAccounts);
             Object.entries(liveData).forEach(([username, data]) => {
-                onlineCards.appendChild(renderLiveDataCard(username, data));
+                if (onlineSet.has(username)) {
+                    onlineCards.appendChild(renderLiveDataCard(username, data));
+                }
+            });
+        }
+
+        // Patch: fetchAndRenderLiveData tidak perlu update offline/error, hanya data live detail
+        // Untuk update status online/offline/error gunakan renderAccountStatusLists dari socket.io
+
+        function renderAccountStatusLists(online, offline, error) {
+            // Online
+            const onlineCards = document.getElementById('onlineCards');
+            onlineCards.innerHTML = '';
+            (online || []).forEach(username => {
+                const card = document.createElement('div');
+                card.className = 'userCard';
+                card.innerHTML = `<div class="header"><span class="username">${username}</span><span class="status"></span></div>`;
+                onlineCards.appendChild(card);
+            });
+            // Offline
+            const offlineList = document.getElementById('offlineList');
+            offlineList.innerHTML = '';
+            (offline || []).forEach(username => {
+                const li = document.createElement('li');
+                li.textContent = username;
+                offlineList.appendChild(li);
+            });
+            // Error
+            const errorList = document.getElementById('errorList');
+            errorList.innerHTML = '';
+            (error || []).forEach(username => {
+                const li = document.createElement('li');
+                li.textContent = username;
+                li.style.color = '#b00';
+                errorList.appendChild(li);
+            });
+        }
+
+        function renderErrorAccounts() {
+            const errorList = document.getElementById('errorList');
+            errorList.innerHTML = '';
+            errorAccounts.forEach(({ username, error }) => {
+                const listItem = document.createElement('li');
+                listItem.textContent = `${username} - ${error}`;
+                errorList.appendChild(listItem);
             });
         }
 
@@ -219,7 +314,7 @@
         window.onload = () => {
             fetch('/api/initialize-accounts', { method: 'POST' })
                 .then(response => response.json())
-                .then(data => console.log(data.message))
+                .then (data => { console.log(data.message); })
                 .catch(error => console.error('Error initializing accounts:', error));
         };
 
@@ -278,12 +373,11 @@
         document.getElementById('startScraping').addEventListener('click', () => {
             loadingOverlay.style.display = 'flex';
             startScrapingButton.disabled = true;
-
             fetch('/api/start-scraping-all', { method: 'POST' })
                 .then(response => response.json())
                 .then(data => {
                     console.log(data.message);
-                    isMonitoring = true; // Set monitoring status to on
+                    setMonitoringStatus(true); // Gunakan setter agar konsisten
                     setTimeout(fetchAndRenderLiveData, 1000);
                 })
                 .catch(error => console.error('Error:', error))
@@ -298,12 +392,11 @@
                 .then(res => res.json())
                 .then(data => {
                     alert('Scraping stopped, semua akun direset offline, data disimpan.');
-                    // Reset UI ke kondisi awal
                     document.getElementById('onlineCards').innerHTML = '';
                     document.getElementById('offlineList').innerHTML = '';
                     liveAccounts = [];
                     offlineAccounts = [];
-                    isMonitoring = false;
+                    setMonitoringStatus(false); // Gunakan setter agar konsisten
                 })
                 .catch(err => alert('Gagal stop & reset: ' + err))
                 .finally(() => loadingOverlay.style.display = 'none');

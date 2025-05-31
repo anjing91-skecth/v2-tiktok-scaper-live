@@ -1,46 +1,15 @@
 {
-  "pufflegirls3": {
-    "username": "pufflegirls3",
-    "room_id": "7510261418377349893",
-    "timestamp_start": "31/05/2025 00:39:25",
-    "viewer": 91,
-    "peak_viewer": 102,
-    "gifts": [
-      {
-        "name": "Doughnut",
-        "diamond": 30,
-        "gifter": "lalu.awan136",
-        "timestamp": 1748626788847,
-        "count": 1
-      }
-    ],
-    "total_diamond": 30,
-    "leaderboard": {
-      "lalu.awan136": 30
-    },
-    "timestamp_end": null,
-    "duration": null
-  },
-  "soul_sisters1000": {
-    "username": "soul_sisters1000",
-    "room_id": "7510244684296735493",
-    "timestamp_start": "31/05/2025 00:39:25",
-    "viewer": 42,
-    "peak_viewer": 49,
-    "gifts": [
-      {
-        "name": "Hi bear",
-        "diamond": 10,
-        "gifter": "yuhumarisaa",
-        "timestamp": 1748626805500,
-        "count": 1
-      }
-    ],
-    "total_diamond": 10,
-    "leaderboard": {
-      "yuhumarisaa": 10
-    },
-    "timestamp_end": null,
-    "duration": null
+  "dj.araki": {
+    "username": "dj.araki",
+    "room_id": "7510473876796394247",
+    "timestamp_start": "31/05/2025 12:14:46",
+    "viewer": 1,
+    "peak_viewer": 1,
+    "gifts": [],
+    "total_diamond": 0,
+    "leaderboard": {},
+    "timestamp_end": "31/05/2025 12:16:26",
+    "duration": "-419m -20s",
+    "status": "finalized"
   }
 }
