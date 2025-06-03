@@ -217,18 +217,57 @@ function formatDateToGMT7(date) {
     return gmt7.toLocaleString('en-GB', { hour12: false }).replace(',', '');
 }
 
+// --- MULTI SESSION PATCH ---
+// liveDataStore[username] = [ { ...session1... }, { ...session2... } ]
+// Setiap sesi dibedakan dengan room_id (roomId TikTok).
+// Saat roomId berubah, sesi lama di-finalize, gifts dikosongkan, leaderboard tetap, dan sesi baru dibuat.
+// Saat reconnect, jika roomId sama, lanjutkan sesi; jika berbeda, buat sesi baru.
+// Saat finalize, gifts dikosongkan, leaderboard tetap, timestamp_end & duration diisi.
+
+// Helper: get current session (last) for a username
+function getCurrentSession(username) {
+    if (!liveDataStore[username] || !Array.isArray(liveDataStore[username])) return null;
+    return liveDataStore[username][liveDataStore[username].length - 1];
+}
+
+// Helper: migrate old data (object) to array-of-sessions
+function migrateLiveDataStoreFormat() {
+    for (const username in liveDataStore) {
+        if (!Array.isArray(liveDataStore[username])) {
+            // Wrap old object as array
+            liveDataStore[username] = [liveDataStore[username]];
+        }
+    }
+    saveLiveDataToFile();
+}
+
+// Call migration on startup
+migrateLiveDataStoreFormat();
+
 function initLiveData(username, metadata) {
-    // Ambil waktu mulai dari metadata TikTok jika ada, fallback ke waktu koneksi
+    migrateLiveDataStoreFormat(); // Ensure always array
     let timestampStart = null;
     if (metadata && metadata.create_time) {
-        // TikTok API: create_time = epoch detik UTC
         timestampStart = formatDateToGMT7(new Date(metadata.create_time * 1000));
     } else {
         timestampStart = formatDateToGMT7(new Date());
     }
-    liveDataStore[username] = {
+    const roomId = metadata && metadata.roomId ? metadata.roomId : null;
+    // Cek apakah sudah ada sesi dan roomId sama, jika ya, lanjutkan sesi
+    let sessions = liveDataStore[username] || [];
+    let lastSession = sessions[sessions.length - 1];
+    if (lastSession && lastSession.room_id === roomId && lastSession.status === 'live') {
+        // Sudah ada sesi live dengan roomId ini, lanjutkan
+        return;
+    }
+    // Jika ada sesi live dengan roomId berbeda, finalize dulu
+    if (lastSession && lastSession.status === 'live' && lastSession.room_id !== roomId) {
+        finalizeLiveData(username);
+    }
+    // Buat sesi baru
+    const newSession = {
         username,
-        room_id: metadata && metadata.roomId ? metadata.roomId : null,
+        room_id: roomId,
         timestamp_start: timestampStart,
         viewer: 0,
         peak_viewer: 0,
@@ -237,64 +276,80 @@ function initLiveData(username, metadata) {
         leaderboard: {},
         timestamp_end: null,
         duration: null,
-        status: 'live' // Tambahkan status
+        status: 'live'
     };
+    if (!Array.isArray(liveDataStore[username])) liveDataStore[username] = [];
+    liveDataStore[username].push(newSession);
     processedGiftMsgIds[username] = new Set();
     saveLiveDataToFile();
 }
 
 function updateLiveData(username, data) {
-    if (!liveDataStore[username]) return;
-    // TikTok-Live-Connector: viewer count is usually in data.viewerCount
+    migrateLiveDataStoreFormat();
+    const session = getCurrentSession(username);
+    if (!session) return;
     if (data.viewer !== undefined) {
-        liveDataStore[username].viewer = data.viewer;
-        if (data.viewer > liveDataStore[username].peak_viewer) {
-            liveDataStore[username].peak_viewer = data.viewer;
+        session.viewer = data.viewer;
+        if (data.viewer > session.peak_viewer) {
+            session.peak_viewer = data.viewer;
         }
     }
     if (data.viewerCount !== undefined) {
-        liveDataStore[username].viewer = data.viewerCount;
-        if (data.viewerCount > liveDataStore[username].peak_viewer) {
-            liveDataStore[username].peak_viewer = data.viewerCount;
+        session.viewer = data.viewerCount;
+        if (data.viewerCount > session.peak_viewer) {
+            session.peak_viewer = data.viewerCount;
         }
     }
     if (data.gift) {
-        // Gabungkan gift combo jika gift sebelumnya (paling atas) sama persis (gifter, name, timestamp)
-        const lastGift = liveDataStore[username].gifts[0];
+        const lastGift = session.gifts[0];
         if (lastGift &&
             lastGift.gifter === data.gift.gifter &&
             lastGift.name === data.gift.name &&
             lastGift.timestamp === data.gift.timestamp
         ) {
-            // Update count dan diamond pada gift paling atas
             lastGift.count += data.gift.count;
             lastGift.diamond += data.gift.diamond;
         } else {
-            liveDataStore[username].gifts.unshift(data.gift);
+            session.gifts.unshift(data.gift);
         }
-        liveDataStore[username].gifts = liveDataStore[username].gifts.slice(0, 10);
-        liveDataStore[username].total_diamond += data.gift.diamond || 0;
+        session.gifts = session.gifts.slice(0, 10);
+        session.total_diamond += data.gift.diamond || 0;
         const gifter = data.gift.gifter || 'unknown';
-        if (!liveDataStore[username].leaderboard[gifter]) liveDataStore[username].leaderboard[gifter] = 0;
-        liveDataStore[username].leaderboard[gifter] += data.gift.diamond || 0;
+        if (!session.leaderboard[gifter]) session.leaderboard[gifter] = 0;
+        session.leaderboard[gifter] += data.gift.diamond || 0;
     }
     saveLiveDataToFile();
     emitLiveDataUpdate(username);
 }
 
 function finalizeLiveData(username) {
-    if (!liveDataStore[username]) return;
-    liveDataStore[username].timestamp_end = formatDateToGMT7(new Date());
-    const start = new Date(liveDataStore[username].timestamp_start.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1'));
-    const end = new Date();
+    migrateLiveDataStoreFormat();
+    const session = getCurrentSession(username);
+    if (!session || session.status === 'finalized') return;
+    session.timestamp_end = formatDateToGMT7(new Date());
+    // Parse timestamp_start dan timestamp_end ke Date object
+    function parseDateString(str) {
+        // Format: dd/MM/yyyy HH:mm:ss
+        const [date, time] = str.split(' ');
+        const [day, month, year] = date.split('/').map(Number);
+        const [hour, minute, second] = time.split(':').map(Number);
+        return new Date(year, month - 1, day, hour, minute, second);
+    }
+    const start = parseDateString(session.timestamp_start);
+    const end = parseDateString(session.timestamp_end);
     const durationMs = end - start;
-    const minutes = Math.floor(durationMs / 60000);
-    const seconds = Math.floor((durationMs % 60000) / 1000);
-    liveDataStore[username].duration = `${minutes}m ${seconds}s`;
-    liveDataStore[username].status = 'finalized'; // Update status
+    if (durationMs > 0) {
+        const minutes = Math.floor(durationMs / 60000);
+        const seconds = Math.floor((durationMs % 60000) / 1000);
+        session.duration = `${minutes}m ${seconds}s`;
+    } else {
+        session.duration = '0m 0s';
+    }
+    session.status = 'finalized';
+    session.gifts = [];
     saveLiveDataToFile();
     emitLiveDataFinalize(username);
-    saveLiveDataToCSV(); // Save CSV on finalize
+    saveLiveDataToCSV();
 }
 
 // --- SOCKET.IO EMIT HELPERS ---

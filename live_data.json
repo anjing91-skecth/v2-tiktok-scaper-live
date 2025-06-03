@@ -1,15 +1,25 @@
 {
-  "dj.araki": {
-    "username": "dj.araki",
-    "room_id": "7510473876796394247",
-    "timestamp_start": "31/05/2025 12:14:46",
-    "viewer": 1,
-    "peak_viewer": 1,
-    "gifts": [],
-    "total_diamond": 0,
-    "leaderboard": {},
-    "timestamp_end": "31/05/2025 12:16:26",
-    "duration": "-419m -20s",
-    "status": "finalized"
-  }
+  "glow_babies1": [
+    {
+      "username": "glow_babies1",
+      "room_id": "7511522739409914629",
+      "timestamp_start": "03/06/2025 09:53:06",
+      "viewer": 16,
+      "peak_viewer": 45,
+      "gifts": [],
+      "total_diamond": 1135,
+      "leaderboard": {
+        "kimchi4155": 5,
+        "mas_tre_": 10,
+        "hazelnut_rifaldi": 412,
+        "geovanilinefuentes": 5,
+        "innva08": 600,
+        "ahmadaqasyah": 100,
+        "riskacaca1107": 3
+      },
+      "timestamp_end": "03/06/2025 10:08:06",
+      "duration": "-405m -60s",
+      "status": "finalized"
+    }
+  ]
 }
