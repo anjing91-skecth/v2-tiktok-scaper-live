@@ -67,7 +67,13 @@ WEBSOCKET_CORS_ORIGIN=*
 DATA_PERSISTENCE_ENABLED=true
 CSV_EXPORT_ENABLED=true
 JSON_EXPORT_ENABLED=true
+
+# SUPABASE CONFIGURATION (CRITICAL for data persistence)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
+
+⚠️ **PENTING**: Set Supabase environment variables untuk menghindari data loss saat redeploy!
 
 ---
 

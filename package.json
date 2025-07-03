@@ -23,8 +23,10 @@
   "author": "TikTok Live Scraper Team",
   "license": "MIT",
   "dependencies": {
+    "@supabase/supabase-js": "^2.50.3",
     "axios": "^1.10.0",
     "cors": "^2.8.5",
+    "dotenv": "^17.0.1",
     "express": "^5.1.0",
     "json2csv": "^6.0.0-alpha.2",
     "socket.io": "^4.8.1",

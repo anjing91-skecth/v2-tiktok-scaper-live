@@ -6,6 +6,12 @@ const { WebcastPushConnection } = require("tiktok-live-connector");
 const http = require('http');
 const { Server } = require('socket.io');
 
+// Load environment variables
+require('dotenv').config();
+
+// Import Supabase client
+const supabaseClient = require('./supabase-client');
+
 // Production Configuration
 const isDevelopment = process.env.NODE_ENV !== 'production';
 const PORT = process.env.PORT || 3000;
@@ -79,19 +85,49 @@ let offlineAccounts = [];
 let errorAccounts = [];
 let connectedAccounts = [];
 
-// Inisialisasi semua akun sebagai offline saat server pertama kali berjalan
-(function initializeAccountsOnServerStart() {
+// Initialize Supabase and load data on server start
+async function initializeServer() {
     try {
+        // Initialize Supabase
+        supabaseClient.initializeSupabase();
+        
+        // Load data from Supabase first
+        if (supabaseClient.useSupabase()) {
+            console.log('Loading data from Supabase...');
+            const supabaseData = await supabaseClient.loadDataFromSupabase();
+            if (Object.keys(supabaseData).length > 0) {
+                Object.assign(liveDataStore, supabaseData);
+                console.log(`✅ Loaded ${Object.keys(supabaseData).length} users from Supabase`);
+            }
+        }
+        
+        // Load from local file as fallback
+        if (fs.existsSync(liveDataFile)) {
+            try {
+                const localData = JSON.parse(fs.readFileSync(liveDataFile, 'utf-8'));
+                // Merge local data dengan Supabase data
+                Object.assign(liveDataStore, localData);
+                console.log('Local data loaded as backup');
+            } catch (e) {
+                console.error('Failed to load local data:', e.message);
+            }
+        }
+        
+        // Initialize accounts as offline
         const usernames = fs.readFileSync(accountFilePath, 'utf-8').split('\n').filter(Boolean);
         offlineAccounts = [...new Set(usernames)];
         liveAccounts = [];
         connectedAccounts = [];
         errorAccounts = [];
         console.log('All accounts initialized as offline on server start.');
+        
     } catch (e) {
-        console.error('Failed to initialize accounts on server start:', e.message);
+        console.error('Failed to initialize server:', e.message);
     }
-})();
+}
+
+// Run initialization
+initializeServer();
 
 // --- CONNECTION MANAGEMENT REFACTOR ---
 // Use a single connection per account, reused between check-live and scraping
@@ -242,6 +278,9 @@ app.post('/api/stop-scraping-and-reset', async (req, res) => {
     res.json({ message: 'All monitoring stopped, all accounts set to offline, data saved, monitoring off.' });
 });
 
+// Live data storage - moved here for early access
+const liveDataStore = {};
+
 // Get current username list
 app.get('/api/get-list', (req, res) => {
     try {
@@ -253,13 +292,18 @@ app.get('/api/get-list', (req, res) => {
 });
 
 // Live data storage
-const liveDataStore = {};
 // Tambahkan penyimpanan msgId yang sudah diproses per user
 const processedGiftMsgIds = {};
 
 function saveLiveDataToFile() {
     fs.writeFileSync(liveDataFile, JSON.stringify(liveDataStore, null, 2));
     saveLiveDataToCSV(); // Save CSV every time live_data.json is saved
+    
+    // NEW: Auto-backup to Supabase
+    if (supabaseClient.useSupabase()) {
+        supabaseClient.backupToSupabase(liveDataStore)
+            .catch(error => console.error('Supabase backup failed:', error));
+    }
 }
 
 function formatDateToGMT7(date) {
@@ -754,7 +798,7 @@ function startAutochecker() {
     autocheckerActive = true;
     io.emit('autoCheckerStatus', { on: true });
     emitStatusUpdate();
-    console.log(`[${new Date().toISOString()}] Autochecker started (interval 15 menit)`);
+    console.log(`[${new Date().toISOString()}] Autochecker started (interval 2 menit)`);
     autocheckerInterval = setInterval(async () => {
         try {
             if (offlineAccounts.length === 0) {
@@ -830,7 +874,7 @@ function startAutochecker() {
         } catch (e) {
             console.error(`[${new Date().toISOString()}] Autochecker FATAL ERROR:`, e);
         }
-    }, 15 * 60 * 1000); // 15 menit
+    }, 2 * 60 * 1000); // 2 menit (untuk testing)
 }
 function stopAutochecker() {
     if (autocheckerInterval) {
