@@ -148,6 +148,14 @@ Railway will automatically deploy when you push to main branch
 - [ ] Frontend: `https://your-app.railway.app/`
 - [ ] API Status: `https://your-app.railway.app/api/live-data`
 
+### **🔄 CRITICAL: Setup Auto-Recovery (WAJIB!)**
+- [ ] **Enable Autorecover** di frontend dashboard
+- [ ] **Start monitoring** dengan autorecover ON
+- [ ] **Verify autorecover status** menunjukkan "ON"
+- [ ] **Test redeploy behavior** - monitoring harus auto-restart
+
+⚠️ **PENTING**: Tanpa autorecover, sistem akan stop setelah redeploy dan perlu manual restart!
+
 ### **Monitor Performance**
 - [ ] Check Railway logs for any errors
 - [ ] Verify rate limiting is working

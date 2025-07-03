@@ -121,6 +121,15 @@ async function initializeServer() {
         errorAccounts = [];
         console.log('All accounts initialized as offline on server start.');
         
+        // Load autorecover status from file
+        if (fs.existsSync(autorecoverFile)) {
+            autorecover = true;
+            console.log('✅ Autorecover flag detected - Auto-recovery enabled');
+        } else {
+            autorecover = false;
+            console.log('ℹ️ No autorecover flag - Auto-recovery disabled');
+        }
+        
     } catch (e) {
         console.error('Failed to initialize server:', e.message);
     }
