@@ -12,11 +12,15 @@ let useSupabase = false;
 
 // Initialize Supabase if credentials are provided
 function initializeSupabase() {
-    if (SUPABASE_URL && SUPABASE_KEY && SUPABASE_URL !== 'https://your-project.supabase.co') {
+    if (SUPABASE_URL && SUPABASE_KEY && 
+        SUPABASE_URL !== 'https://your-project.supabase.co' && 
+        SUPABASE_KEY !== 'your-service-role-key' &&
+        SUPABASE_URL.includes('supabase.co')) {
         try {
             supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
             useSupabase = true;
             console.log('✅ Supabase initialized successfully');
+            console.log(`🔗 Connected to: ${SUPABASE_URL}`);
             return true;
         } catch (error) {
             console.error('❌ Failed to initialize Supabase:', error);
@@ -25,6 +29,8 @@ function initializeSupabase() {
         }
     } else {
         console.log('ℹ️ Supabase not configured, using local file storage');
+        console.log(`🔍 Debug - URL: ${SUPABASE_URL}`);
+        console.log(`🔍 Debug - Key length: ${SUPABASE_KEY ? SUPABASE_KEY.length : 0}`);
         useSupabase = false;
         return false;
     }
