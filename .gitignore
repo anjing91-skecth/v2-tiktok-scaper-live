@@ -54,19 +54,21 @@ temp/
 
 # Application specific
 scraping.log
-*.csv
-*.json
+data/*.csv
+data/*.json
 !package.json
 !package-lock.json
 autorecover.flag
-backup*/
-tiktok_live_metadata_*.json
+data/backups/*/
+data/live-metadata/*.json
 
 # Keep important files
-!account.txt
+!data/accounts/account*.txt
 !accountpool
 !frontend.html
 !server.js
 !README.md
 !railway.toml
 !.env.example
+!docs/**/*.md
+!scripts/*.sql

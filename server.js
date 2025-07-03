@@ -45,10 +45,10 @@ let autorecover = false;
 let isMonitoring = false;
 
 const app = express();
-const accountFilePath = path.join(__dirname, 'account.txt');
+const accountFilePath = path.join(__dirname, 'data', 'accounts', 'account.txt');
 const logFilePath = path.join(__dirname, 'scraping.log');
-const liveDataFile = path.join(__dirname, 'live_data.json');
-const csvFilePath = path.join(__dirname, 'live_data.csv');
+const liveDataFile = path.join(__dirname, 'data', 'live_data.json');
+const csvFilePath = path.join(__dirname, 'data', 'live_data.csv');
 const autorecoverFile = path.join(__dirname, 'autorecover.flag');
 
 // CORS Configuration for Production

@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 
-const accountFilePath = path.join(__dirname, '../account.txt');
+const accountFilePath = path.join(__dirname, '../data/accounts/account.txt');
 
 router.post('/edit-list', (req, res) => {
     const { usernames } = req.body;

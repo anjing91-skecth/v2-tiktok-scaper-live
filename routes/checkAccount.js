@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 
-const accountFilePath = path.join(__dirname, '../account.txt');
+const accountFilePath = path.join(__dirname, '../data/accounts/account.txt');
 
 // These will be injected from server.js
 let liveAccounts = [];
