@@ -1,1 +1,116 @@
-{}
+{
+  "tiramisu_dance": [
+    {
+      "username": "tiramisu_dance",
+      "room_id": "7522744254997760773",
+      "session_id": "tiramisu_dance_1751536136997_ed93182f",
+      "timestamp_start": "03/07/2025 16:48:56",
+      "timestamp_start_real": "03/07/2025 16:48:56",
+      "timestamp_monitoring_start": "03/07/2025 16:48:56",
+      "create_time": null,
+      "last_update_time": "2025-07-03T09:48:56.997Z",
+      "viewer": 0,
+      "peak_viewer": 0,
+      "gifts": [],
+      "total_diamond": 0,
+      "leaderboard": {},
+      "timestamp_end": "03/07/2025 16:48:59",
+      "duration": "0m 3s",
+      "duration_monitored": "0m 3s",
+      "status": "finalized",
+      "connection_attempts": 1,
+      "session_notes": [
+        {
+          "timestamp": "03/07/2025 16:48:56",
+          "note": "Session started - Room: 7522744254997760773, Method: auto"
+        }
+      ]
+    }
+  ],
+  "firedance.fd": [
+    {
+      "username": "firedance.fd",
+      "room_id": "7522762247769934597",
+      "session_id": "firedance.fd_1751536137001_23b01e92",
+      "timestamp_start": "03/07/2025 16:48:57",
+      "timestamp_start_real": "03/07/2025 16:48:57",
+      "timestamp_monitoring_start": "03/07/2025 16:48:57",
+      "create_time": null,
+      "last_update_time": "2025-07-03T09:48:58.817Z",
+      "viewer": 385,
+      "peak_viewer": 385,
+      "gifts": [],
+      "total_diamond": 3,
+      "leaderboard": {
+        "strawberies_s0": 3
+      },
+      "timestamp_end": "03/07/2025 16:48:59",
+      "duration": "0m 2s",
+      "duration_monitored": "0m 2s",
+      "status": "finalized",
+      "connection_attempts": 1,
+      "session_notes": [
+        {
+          "timestamp": "03/07/2025 16:48:57",
+          "note": "Session started - Room: 7522762247769934597, Method: auto"
+        }
+      ]
+    }
+  ],
+  "cocoberrygirls": [
+    {
+      "username": "cocoberrygirls",
+      "room_id": "7522755897476156165",
+      "session_id": "cocoberrygirls_1751536137004_d58e70f1",
+      "timestamp_start": "03/07/2025 16:48:57",
+      "timestamp_start_real": "03/07/2025 16:48:57",
+      "timestamp_monitoring_start": "03/07/2025 16:48:57",
+      "create_time": null,
+      "last_update_time": "2025-07-03T09:48:57.004Z",
+      "viewer": 0,
+      "peak_viewer": 0,
+      "gifts": [],
+      "total_diamond": 0,
+      "leaderboard": {},
+      "timestamp_end": "03/07/2025 16:48:59",
+      "duration": "0m 2s",
+      "duration_monitored": "0m 2s",
+      "status": "finalized",
+      "connection_attempts": 1,
+      "session_notes": [
+        {
+          "timestamp": "03/07/2025 16:48:57",
+          "note": "Session started - Room: 7522755897476156165, Method: auto"
+        }
+      ]
+    }
+  ],
+  "nova_deluna": [
+    {
+      "username": "nova_deluna",
+      "room_id": "7522768478442523448",
+      "session_id": "nova_deluna_1751536137008_332cf048",
+      "timestamp_start": "03/07/2025 16:48:57",
+      "timestamp_start_real": "03/07/2025 16:48:57",
+      "timestamp_monitoring_start": "03/07/2025 16:48:57",
+      "create_time": null,
+      "last_update_time": "2025-07-03T09:48:57.008Z",
+      "viewer": 0,
+      "peak_viewer": 0,
+      "gifts": [],
+      "total_diamond": 0,
+      "leaderboard": {},
+      "timestamp_end": "03/07/2025 16:48:59",
+      "duration": "0m 2s",
+      "duration_monitored": "0m 2s",
+      "status": "finalized",
+      "connection_attempts": 1,
+      "session_notes": [
+        {
+          "timestamp": "03/07/2025 16:48:57",
+          "note": "Session started - Room: 7522768478442523448, Method: auto"
+        }
+      ]
+    }
+  ]
+}

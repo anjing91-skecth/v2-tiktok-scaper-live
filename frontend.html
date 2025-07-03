@@ -177,13 +177,25 @@
     <script>
         // --- STATUS BAR ---
         function updateStatusBar(status) {
-            const bar = document.getElementById('statusBar');
-            bar.innerHTML = `
-                <span style="color:${status.autochecker?'#007b00':'#b00'}">Autochecker: <b>${status.autochecker?'ON':'OFF'}</b></span>
-                <span style="color:${status.monitoring?'#007b00':'#b00'}">Monitoring: <b>${status.monitoring?'ON':'OFF'}</b></span>
-                <span style="color:${status.scraping?'#007b00':'#b00'}">Scraping: <b>${status.scraping?'ON':'OFF'}</b></span>
-                <span style="color:${status.autorecover?'#007b00':'#b00'}">Autorecover: <b>${status.autorecover?'ON':'OFF'}</b></span>
+            const statusBar = document.getElementById('statusBar');
+            if (!statusBar) return;
+            
+            const autochecker = status.autochecker ? 'ON' : 'OFF';
+            const monitoring = status.monitoring ? 'ON' : 'OFF';
+            const scraping = status.scraping ? 'ON' : 'OFF';
+            const autorecover = status.autorecover ? 'ON' : 'OFF';
+            
+            statusBar.innerHTML = `
+                <span>Autochecker: <strong>${autochecker}</strong></span> |
+                <span>Monitoring: <strong>${monitoring}</strong></span> |
+                <span>Scraping: <strong>${scraping}</strong></span> |
+                <span>Autorecover: <strong>${autorecover}</strong></span>
             `;
+            
+            // Update global state
+            isMonitoring = status.monitoring;
+            
+            console.log('Status bar updated:', status);
         }
 
         let liveAccounts = [];
@@ -203,6 +215,7 @@
         socket.on('statusUpdate', status => {
             updateStatusBar(status);
             isScraping = !!status.scraping;
+            updateButtonStates(); // Update button states when status changes
         });
         // On live data update, update or add the card
         socket.on('liveDataUpdate', ({ username, data }) => {
@@ -220,14 +233,14 @@
         socket.on('accountStatusUpdate', ({ online, offline, error }) => {
             renderAccountStatusLists(online, offline, error);
             liveAccounts = online || [];
+            offlineAccounts = offline || [];
+            errorAccounts = error || [];
             cleanLiveDataForOnline(); // PATCH: bersihkan kartu offline
             renderLiveDataCards(window._liveData || {});
-            // Tombol startScraping hanya aktif jika monitoring belum jalan
-            if (!isMonitoring && liveAccounts.length > 0) {
-                startScrapingButton.disabled = false;
-            } else {
-                startScrapingButton.disabled = true;
-            }
+            
+            // Update button states
+            updateButtonStates();
+            
             // Auto-trigger scraping if monitoring ON, scraping OFF, and there are live accounts
             if (isMonitoring && !isScraping && liveAccounts.length > 0) {
                 isScraping = true; // Prevent double trigger
@@ -276,32 +289,42 @@
         // Untuk update status online/offline/error gunakan renderAccountStatusLists dari socket.io
 
         function renderAccountStatusLists(online, offline, error) {
+            console.log('Rendering account status lists:', { online: online?.length, offline: offline?.length, error: error?.length });
+            
             // Online
             const onlineCards = document.getElementById('onlineCards');
-            onlineCards.innerHTML = '';
-            (online || []).forEach(username => {
-                const card = document.createElement('div');
-                card.className = 'userCard';
-                card.innerHTML = `<div class="header"><span class="username">${username}</span><span class="status"></span></div>`;
-                onlineCards.appendChild(card);
-            });
+            if (onlineCards) {
+                onlineCards.innerHTML = '';
+                (online || []).forEach(username => {
+                    const card = document.createElement('div');
+                    card.className = 'userCard';
+                    card.innerHTML = `<div class="header"><span class="username">${username}</span><span class="status"></span></div>`;
+                    onlineCards.appendChild(card);
+                });
+            }
+            
             // Offline
             const offlineList = document.getElementById('offlineList');
-            offlineList.innerHTML = '';
-            (offline || []).forEach(username => {
-                const li = document.createElement('li');
-                li.textContent = username;
-                offlineList.appendChild(li);
-            });
+            if (offlineList) {
+                offlineList.innerHTML = '';
+                (offline || []).forEach(username => {
+                    const li = document.createElement('li');
+                    li.textContent = username;
+                    offlineList.appendChild(li);
+                });
+            }
+            
             // Error
             const errorList = document.getElementById('errorList');
-            errorList.innerHTML = '';
-            (error || []).forEach(username => {
-                const li = document.createElement('li');
-                li.textContent = username;
-                li.style.color = '#b00';
-                errorList.appendChild(li);
-            });
+            if (errorList) {
+                errorList.innerHTML = '';
+                (error || []).forEach(username => {
+                    const li = document.createElement('li');
+                    li.textContent = username;
+                    li.style.color = '#b00';
+                    errorList.appendChild(li);
+                });
+            }
         }
 
         function renderErrorAccounts() {
@@ -314,11 +337,60 @@
             });
         }
 
-        // Initialize accounts as offline on page load
+        // Update button states based on current status
+        function updateButtonStates() {
+            const hasLiveAccounts = liveAccounts.length > 0;
+            const isScrapingActive = isMonitoring;
+            
+            // Update start scraping button
+            startScrapingButton.disabled = !hasLiveAccounts || isScrapingActive;
+            
+            // Update stop buttons
+            const stopButton = document.getElementById('stopScraping');
+            if (stopButton) {
+                stopButton.disabled = !isScrapingActive;
+            }
+            
+            // Update check status button
+            checkStatusButton.disabled = false;
+            
+            console.log('Button states updated:', {
+                hasLiveAccounts,
+                isScrapingActive,
+                startScrapingDisabled: startScrapingButton.disabled
+            });
+        }
+
+        // Initialize accounts and restore current state on page load
         window.onload = () => {
             fetch('/api/initialize-accounts', { method: 'POST' })
                 .then(response => response.json())
-                .then (data => { console.log(data.message); })
+                .then(data => {
+                    console.log('Initializing with current state:', data);
+                    
+                    // Restore current status
+                    if (data.status) {
+                        isMonitoring = data.status.monitoring;
+                        updateStatusBar(data.status);
+                    }
+                    
+                    // Restore current accounts
+                    if (data.accounts) {
+                        liveAccounts = data.accounts.online || [];
+                        offlineAccounts = data.accounts.offline || [];
+                        errorAccounts = data.accounts.error || [];
+                        renderAccountStatusLists(liveAccounts, offlineAccounts, errorAccounts);
+                    }
+                    
+                    // Restore current live data
+                    if (data.liveData) {
+                        window._liveData = data.liveData;
+                        renderLiveDataCards(data.liveData);
+                    }
+                    
+                    // Update button states
+                    updateButtonStates();
+                })
                 .catch(error => console.error('Error initializing accounts:', error));
         };
 

@@ -1230,3 +1230,24 @@ async function processAccountsBatch(accounts, batchSize = 2) {
     
     return results;
 }
+
+// API to initialize accounts and get current status on page load
+app.post('/api/initialize-accounts', (req, res) => {
+    // Send current status to help frontend initialize properly
+    res.json({
+        success: true,
+        message: 'Accounts initialized',
+        status: {
+            autochecker: typeof autocheckerActive !== 'undefined' ? autocheckerActive : false,
+            monitoring: typeof isMonitoring !== 'undefined' ? isMonitoring : false,
+            scraping: typeof isMonitoring !== 'undefined' && isMonitoring,
+            autorecover: typeof autorecover !== 'undefined' ? autorecover : false
+        },
+        accounts: {
+            online: liveAccounts,
+            offline: offlineAccounts,
+            error: errorAccounts
+        },
+        liveData: liveDataStore
+    });
+});
