@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
+    "dev": "node server.js",
     "test": "node test_comprehensive.js",
     "test:rate-limit": "node test_rate_limits.js",
     "test:production": "node test_production_rate_limiting.js",
@@ -31,9 +31,6 @@
     "socket.io-client": "^4.8.1",
     "tiktok-live-connector": "^2.0.5-beta1",
     "ws": "^8.18.2"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
   },
   "engines": {
     "node": ">=18.0.0",

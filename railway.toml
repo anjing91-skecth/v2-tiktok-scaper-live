@@ -2,11 +2,11 @@
 # This file tells Railway how to deploy your application
 
 [build]
-  command = "npm install"
+  command = "npm install --only=production"
 
 [deploy]
   startCommand = "npm start"
-  healthcheckPath = "/"
+  healthcheckPath = "/healthz"
   healthcheckTimeout = 300
 
 [env]
