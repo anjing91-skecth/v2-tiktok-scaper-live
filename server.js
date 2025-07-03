@@ -85,6 +85,9 @@ let offlineAccounts = [];
 let errorAccounts = [];
 let connectedAccounts = [];
 
+// Initialize live data store
+let liveDataStore = {};
+
 // Initialize Supabase and load data on server start
 async function initializeServer() {
     try {
@@ -286,9 +289,6 @@ app.post('/api/stop-scraping-and-reset', async (req, res) => {
     emitAccountStatusUpdate(); // PATCH: emit ke frontend agar UI langsung update
     res.json({ message: 'All monitoring stopped, all accounts set to offline, data saved, monitoring off.' });
 });
-
-// Live data storage - moved here for early access
-const liveDataStore = {};
 
 // Get current username list
 app.get('/api/get-list', (req, res) => {
