@@ -220,17 +220,7 @@
         socket.on('accountStatusUpdate', ({ online, offline, error }) => {
             renderAccountStatusLists(online, offline, error);
             liveAccounts = online || [];
-            // PATCH: Pastikan window._liveData hanya berisi akun yang online
-            function cleanLiveDataForOnline() {
-                if (!window._liveData) return;
-                const onlineSet = new Set(liveAccounts);
-                Object.keys(window._liveData).forEach(username => {
-                    if (!onlineSet.has(username)) {
-                        delete window._liveData[username];
-                    }
-                });
-            }
-            cleanLiveDataForOnline();
+            cleanLiveDataForOnline(); // PATCH: bersihkan kartu offline
             renderLiveDataCards(window._liveData || {});
             // Tombol startScraping hanya aktif jika monitoring belum jalan
             if (!isMonitoring && liveAccounts.length > 0) {
@@ -259,13 +249,27 @@
         function renderLiveDataCards(liveData) {
             const onlineCards = document.getElementById('onlineCards');
             onlineCards.innerHTML = '';
-            // Hanya render kartu untuk akun yang masih online (dan ada datanya)
             const onlineSet = new Set(liveAccounts);
-            Object.entries(liveData).forEach(([username, data]) => {
+            Object.entries(liveData).forEach(([username, sessions]) => {
+                if (!Array.isArray(sessions) || sessions.length === 0) return;
+                // Ambil sesi terakhir (terbaru)
+                const data = sessions[sessions.length - 1];
+                // Hanya render kartu jika akun masih online
                 if (onlineSet.has(username)) {
                     onlineCards.appendChild(renderLiveDataCard(username, data));
                 }
             });
+        }
+
+        // Patch renderLiveDataCard: tidak perlu diubah, karena sudah menerima data sesi terakhir
+        // Patch fetchAndRenderLiveData:
+        function fetchAndRenderLiveData() {
+            fetch('/api/live-data')
+                .then(res => res.json())
+                .then(liveData => {
+                    window._liveData = liveData;
+                    renderLiveDataCards(liveData);
+                });
         }
 
         // Patch: fetchAndRenderLiveData tidak perlu update offline/error, hanya data live detail
@@ -492,6 +496,17 @@
         }
 
         // Call this after checkStatus and after startScraping
+
+        // --- PATCH: Pastikan cleanLiveDataForOnline didefinisikan di global scope ---
+        function cleanLiveDataForOnline() {
+            if (!window._liveData) return;
+            const onlineSet = new Set(liveAccounts);
+            Object.keys(window._liveData).forEach(username => {
+                if (!onlineSet.has(username)) {
+                    delete window._liveData[username];
+                }
+            });
+        }
     </script>
 </body>
 </html>

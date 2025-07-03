@@ -6,18 +6,53 @@ const { WebcastPushConnection } = require("tiktok-live-connector");
 const http = require('http');
 const { Server } = require('socket.io');
 
+// Production Configuration
+const isDevelopment = process.env.NODE_ENV !== 'production';
+const PORT = process.env.PORT || 3000;
+
+// Rate Limiting Configuration
+const RATE_LIMIT_ENABLED = process.env.RATE_LIMIT_ENABLED !== 'false';
+const RATE_LIMIT_REQUESTS_PER_MINUTE = parseInt(process.env.RATE_LIMIT_REQUESTS_PER_MINUTE) || 8;
+const RATE_LIMIT_REQUESTS_PER_HOUR = parseInt(process.env.RATE_LIMIT_REQUESTS_PER_HOUR) || 50;
+const RATE_LIMIT_REQUEST_DELAY = parseInt(process.env.RATE_LIMIT_REQUEST_DELAY) || 1000;
+
+// Session Detection Configuration
+const SESSION_DETECTION_ENABLED = process.env.SESSION_DETECTION_ENABLED !== 'false';
+const SESSION_TIME_GAP_THRESHOLD = parseInt(process.env.SESSION_TIME_GAP_THRESHOLD) || 600000; // 10 minutes
+const SESSION_MAX_DURATION = parseInt(process.env.SESSION_MAX_DURATION) || 43200000; // 12 hours
+
+// Auto-Checker Configuration
+const AUTO_CHECKER_INTERVAL = parseInt(process.env.AUTO_CHECKER_INTERVAL) || 900000; // 15 minutes
+const AUTO_CHECKER_ENABLED = process.env.AUTO_CHECKER_ENABLED !== 'false';
+
+// Logging Configuration
+const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
+const LOG_ENHANCED_RATE_LIMITING = process.env.LOG_ENHANCED_RATE_LIMITING !== 'false';
+const LOG_SESSION_DETECTION = process.env.LOG_SESSION_DETECTION !== 'false';
+
+// EulerStream Configuration
+const EULERSTREAM_RATE_LIMIT_CHECK_INTERVAL = parseInt(process.env.EULERSTREAM_RATE_LIMIT_CHECK_INTERVAL) || 300000; // 5 minutes
+const EULERSTREAM_ADAPTIVE_RATE_LIMITING = process.env.EULERSTREAM_ADAPTIVE_RATE_LIMITING !== 'false';
+
+// Application State
 let autorecover = false;
 let isMonitoring = false;
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 const accountFilePath = path.join(__dirname, 'account.txt');
 const logFilePath = path.join(__dirname, 'scraping.log');
 const liveDataFile = path.join(__dirname, 'live_data.json');
 const csvFilePath = path.join(__dirname, 'live_data.csv');
 const autorecoverFile = path.join(__dirname, 'autorecover.flag');
 
-app.use(cors());
+// CORS Configuration for Production
+const corsOptions = {
+    origin: process.env.WEBSOCKET_CORS_ORIGIN || (isDevelopment ? "*" : false),
+    credentials: true,
+    optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Clear log file on startup
@@ -74,6 +109,9 @@ app.post('/api/check-live', async (req, res) => {
     let live = [];
     let offline = [];
     let error = [];
+    
+    console.log(`[CHECK-LIVE] Checking ${accountsToCheck.length} accounts with rate limiting...`);
+    
     for (const username of accountsToCheck) {
         let connection = activeConnections[username];
         if (!connection) {
@@ -81,19 +119,30 @@ app.post('/api/check-live', async (req, res) => {
             activeConnections[username] = connection;
         }
         try {
+            // Apply rate limiting before connection
+            await tikTokRateLimiter.canMakeRequest();
+            
             await connection.connect();
             if (!liveAccounts.includes(username)) liveAccounts.push(username);
             live.push(username);
+            console.log(`[CHECK-LIVE] ✅ ${username} is LIVE`);
         } catch (err) {
             if (err.message && err.message.includes("isn't online")) {
                 offlineAccounts.push(username);
                 offline.push(username);
+                console.log(`[CHECK-LIVE] ⭕ ${username} is OFFLINE`);
             } else {
                 errorAccounts.push(username);
                 error.push(username);
+                console.log(`[CHECK-LIVE] ❌ ${username} ERROR: ${err.message}`);
             }
         }
     }
+    
+    // Show rate limiter status
+    const rateLimiterStatus = tikTokRateLimiter.getStatus();
+    console.log(`[CHECK-LIVE] Rate limiter status: ${rateLimiterStatus.requests_made}/${rateLimiterStatus.max_requests} requests, ${rateLimiterStatus.hourly_requests} hourly`);
+    
     // Setelah check, jika masih ada offline, aktifkan autochecker
     if (offlineAccounts.length > 0) {
         startAutochecker();
@@ -189,6 +238,7 @@ app.post('/api/stop-scraping-and-reset', async (req, res) => {
     // 5. Reset liveDataStore (jika ingin data baru, atau biarkan untuk histori)
     // Object.keys(liveDataStore).forEach(k => delete liveDataStore[k]);
     emitStatusUpdate();
+    emitAccountStatusUpdate(); // PATCH: emit ke frontend agar UI langsung update
     res.json({ message: 'All monitoring stopped, all accounts set to offline, data saved, monitoring off.' });
 });
 
@@ -246,29 +296,54 @@ migrateLiveDataStoreFormat();
 
 function initLiveData(username, metadata) {
     migrateLiveDataStoreFormat(); // Ensure always array
+    
+    // Parse timestamps
     let timestampStart = null;
+    let createTime = null;
+    
     if (metadata && metadata.create_time) {
-        timestampStart = formatDateToGMT7(new Date(metadata.create_time * 1000));
+        createTime = new Date(metadata.create_time * 1000);
+        timestampStart = formatDateToGMT7(createTime);
     } else {
         timestampStart = formatDateToGMT7(new Date());
     }
+    
     const roomId = metadata && metadata.roomId ? metadata.roomId : null;
-    // Cek apakah sudah ada sesi dan roomId sama, jika ya, lanjutkan sesi
+    const currentTime = new Date();
+    
+    // Get existing sessions
     let sessions = liveDataStore[username] || [];
     let lastSession = sessions[sessions.length - 1];
-    if (lastSession && lastSession.room_id === roomId && lastSession.status === 'live') {
-        // Sudah ada sesi live dengan roomId ini, lanjutkan
+    
+    // --- MULTI-FACTOR SESSION DETECTION ---
+    const isSameSession = checkIfSameSession(lastSession, {
+        roomId,
+        createTime,
+        currentTime,
+        username
+    });
+    
+    if (isSameSession) {
+        // Lanjutkan sesi yang sama
+        console.log(`[SESSION] Continuing existing session for ${username} (Room: ${roomId})`);
         return;
     }
-    // Jika ada sesi live dengan roomId berbeda, finalize dulu
-    if (lastSession && lastSession.status === 'live' && lastSession.room_id !== roomId) {
+    
+    // Jika ada sesi live aktif yang berbeda, finalize dulu
+    if (lastSession && lastSession.status === 'live') {
+        console.log(`[SESSION] Finalizing previous session for ${username} (New session detected)`);
         finalizeLiveData(username);
     }
-    // Buat sesi baru
+    // Buat sesi baru dengan data yang lebih lengkap
     const newSession = {
         username,
         room_id: roomId,
+        session_id: generateSessionId(username, roomId, currentTime), // Unique session ID
         timestamp_start: timestampStart,
+        timestamp_start_real: timestampStart, // Waktu sebenarnya live dimulai (dari TikTok)
+        timestamp_monitoring_start: formatDateToGMT7(currentTime), // Waktu mulai monitoring
+        create_time: createTime, // Store create_time untuk validasi
+        last_update_time: currentTime, // Track last update untuk gap detection
         viewer: 0,
         peak_viewer: 0,
         gifts: [],
@@ -276,8 +351,24 @@ function initLiveData(username, metadata) {
         leaderboard: {},
         timestamp_end: null,
         duration: null,
-        status: 'live'
+        duration_monitored: null, // Durasi yang dimonitor
+        status: 'live',
+        // Metadata tambahan untuk tracking
+        connection_attempts: 1,
+        session_notes: [] // Catatan penting tentang session
     };
+    
+    // Add session start note
+    newSession.session_notes.push({
+        timestamp: formatDateToGMT7(currentTime),
+        note: `Session started - Room: ${roomId}, Method: ${metadata?.method || 'auto'}`
+    });
+    
+    console.log(`[SESSION] New session created for ${username}:`, {
+        session_id: newSession.session_id,
+        room_id: roomId,
+        timestamp_start: timestampStart
+    });
     if (!Array.isArray(liveDataStore[username])) liveDataStore[username] = [];
     liveDataStore[username].push(newSession);
     processedGiftMsgIds[username] = new Set();
@@ -288,6 +379,10 @@ function updateLiveData(username, data) {
     migrateLiveDataStoreFormat();
     const session = getCurrentSession(username);
     if (!session) return;
+    
+    // Update session tracking
+    updateSessionTracking(username);
+    
     if (data.viewer !== undefined) {
         session.viewer = data.viewer;
         if (data.viewer > session.peak_viewer) {
@@ -318,16 +413,27 @@ function updateLiveData(username, data) {
         if (!session.leaderboard[gifter]) session.leaderboard[gifter] = 0;
         session.leaderboard[gifter] += data.gift.diamond || 0;
     }
+    
+    // Add significant events to session notes
+    if (data.significant_event) {
+        session.session_notes.push({
+            timestamp: formatDateToGMT7(new Date()),
+            note: data.significant_event
+        });
+    }
+    
     saveLiveDataToFile();
     emitLiveDataUpdate(username);
 }
 
+// --- PATCH: Simpan hanya 10 leaderboard teratas ke live_data.json saat finalize ---
 function finalizeLiveData(username) {
     migrateLiveDataStoreFormat();
     const session = getCurrentSession(username);
     if (!session || session.status === 'finalized') return;
     session.timestamp_end = formatDateToGMT7(new Date());
-    // Parse timestamp_start dan timestamp_end ke Date object
+    
+    // Parse timestamp untuk durasi
     function parseDateString(str) {
         // Format: dd/MM/yyyy HH:mm:ss
         const [date, time] = str.split(' ');
@@ -335,18 +441,41 @@ function finalizeLiveData(username) {
         const [hour, minute, second] = time.split(':').map(Number);
         return new Date(year, month - 1, day, hour, minute, second);
     }
-    const start = parseDateString(session.timestamp_start);
-    const end = parseDateString(session.timestamp_end);
-    const durationMs = end - start;
-    if (durationMs > 0) {
-        const minutes = Math.floor(durationMs / 60000);
-        const seconds = Math.floor((durationMs % 60000) / 1000);
-        session.duration = `${minutes}m ${seconds}s`;
-    } else {
-        session.duration = '0m 0s';
+    
+    // Hitung durasi sebenarnya live (dari timestamp_start_real ke timestamp_end)
+    if (session.timestamp_start_real) {
+        const startReal = parseDateString(session.timestamp_start_real);
+        const end = parseDateString(session.timestamp_end);
+        const durationMs = end - startReal;
+        if (durationMs > 0) {
+            const minutes = Math.floor(durationMs / 60000);
+            const seconds = Math.floor((durationMs % 60000) / 1000);
+            session.duration = `${minutes}m ${seconds}s`;
+        } else {
+            session.duration = '0m 0s';
+        }
+    }
+    
+    // Hitung durasi monitoring (dari timestamp_monitoring_start ke timestamp_end)
+    if (session.timestamp_monitoring_start) {
+        const startMonitoring = parseDateString(session.timestamp_monitoring_start);
+        const end = parseDateString(session.timestamp_end);
+        const monitoringMs = end - startMonitoring;
+        if (monitoringMs > 0) {
+            const minutes = Math.floor(monitoringMs / 60000);
+            const seconds = Math.floor((monitoringMs % 60000) / 1000);
+            session.duration_monitored = `${minutes}m ${seconds}s`;
+        } else {
+            session.duration_monitored = '0m 0s';
+        }
     }
     session.status = 'finalized';
     session.gifts = [];
+    // Simpan hanya 10 leaderboard teratas
+    if (session.leaderboard) {
+        const sorted = Object.entries(session.leaderboard).sort((a,b)=>b[1]-a[1]).slice(0,10);
+        session.leaderboard = Object.fromEntries(sorted);
+    }
     saveLiveDataToFile();
     emitLiveDataFinalize(username);
     saveLiveDataToCSV();
@@ -363,6 +492,11 @@ function emitLiveDataFinalize(username) {
 // API to get live data for frontend
 app.get('/api/live-data', (req, res) => {
     res.json(liveDataStore);
+});
+
+// Health check endpoint for Railway/production
+app.get('/healthz', (req, res) => {
+    res.status(200).json({ status: 'ok', uptime: process.uptime(), timestamp: Date.now() });
 });
 
 const server = http.createServer(app);
@@ -404,28 +538,30 @@ function saveLiveDataToCSV() {
     ];
     let rows = [header.join('|')];
     for (const username in liveDataStore) {
-        const data = liveDataStore[username];
-        if (!data.room_id) continue; // skip if no room id
-        // Format tanggal dan jam dari timestamp_start jika ada, else '-'
-        const tgl = data.timestamp_start || '-';
-        const row = [
-            tgl,
-            data.room_id,
-            data.username,
-            data.duration || '-',
-            data.peak_viewer || 0,
-            data.total_diamond || 0
-        ];
-        // Top spender
-        const sorted = Object.entries(data.leaderboard||{}).sort((a,b)=>b[1]-a[1]);
-        for (let i=0; i<10; i++) {
-            if (sorted[i]) {
-                row.push(`${sorted[i][0]}(${sorted[i][1]})`);
-            } else {
-                row.push('');
+        const sessions = liveDataStore[username];
+        if (!Array.isArray(sessions)) continue;
+        sessions.forEach(data => {
+            if (!data.room_id) return; // skip if no room id
+            const tgl = data.timestamp_start || '-';
+            const row = [
+                tgl,
+                data.room_id,
+                data.username,
+                data.duration || '-',
+                data.peak_viewer || 0,
+                data.total_diamond || 0
+            ];
+            // Leaderboard sudah dipastikan hanya 10 teratas saat finalize, tapi tetap slice 10 untuk safety
+            const sorted = Object.entries(data.leaderboard||{}).sort((a,b)=>b[1]-a[1]).slice(0,10);
+            for (let i=0; i<10; i++) {
+                if (sorted[i]) {
+                    row.push(`${sorted[i][0]}(${sorted[i][1]})`);
+                } else {
+                    row.push('');
+                }
             }
-        }
-        rows.push(row.join('|'));
+            rows.push(row.join('|'));
+        });
     }
     fs.writeFileSync(csvFilePath, rows.join('\n'));
 }
@@ -631,6 +767,9 @@ function startAutochecker() {
             let newlyLive = [];
             let stillOffline = [];
             let errorAccountsLocal = [];
+            
+            console.log(`[${new Date().toISOString()}] Autochecker: Checking ${accountsToCheck.length} accounts with rate limiting...`);
+            
             for (const username of accountsToCheck) {
                 // Selalu buat koneksi baru untuk pengecekan fresh
                 if (activeConnections[username]) {
@@ -644,6 +783,9 @@ function startAutochecker() {
                 activeConnections[username] = connection;
                 let prevStatus = liveAccounts.includes(username) ? 'online' : 'offline';
                 try {
+                    // Apply rate limiting before connection
+                    await tikTokRateLimiter.canMakeRequest();
+                    
                     await connection.connect();
                     if (!liveAccounts.includes(username)) liveAccounts.push(username);
                     newlyLive.push(username);
@@ -655,19 +797,24 @@ function startAutochecker() {
                     if (!liveDataStore[username]) {
                         initLiveData(username, connection.state || {});
                     }
-                    console.log(`[${new Date().toISOString()}] Autochecker: Scraping started for ${username} (monitoring ON)`);
+                    console.log(`[${new Date().toISOString()}] Autochecker: ✅ ${username} is LIVE - Scraping started (monitoring ON)`);
                 } catch (err) {
                     if (err.message && err.message.includes("isn't online")) {
                         stillOffline.push(username);
                         logStatusChange(username, prevStatus, 'offline');
-                        console.log(`[${new Date().toISOString()}] Autochecker: ${username} is OFFLINE.`);
+                        console.log(`[${new Date().toISOString()}] Autochecker: ⭕ ${username} is OFFLINE`);
                     } else {
                         errorAccountsLocal.push(username);
                         logStatusChange(username, prevStatus, 'error');
-                        console.error(`[${new Date().toISOString()}] Autochecker ERROR: ${username} =>`, err.message || err);
+                        console.error(`[${new Date().toISOString()}] Autochecker: ❌ ${username} ERROR: ${err.message || err}`);
                     }
                 }
             }
+            
+            // Show rate limiter status
+            const rateLimiterStatus = tikTokRateLimiter.getStatus();
+            console.log(`[${new Date().toISOString()}] Autochecker: Rate limiter status: ${rateLimiterStatus.requests_made}/${rateLimiterStatus.max_requests} requests, ${rateLimiterStatus.hourly_requests} hourly`);
+            
             // Update global offlineAccounts dan errorAccounts
             offlineAccounts = stillOffline;
             errorAccounts = errorAccountsLocal;
@@ -695,6 +842,10 @@ function stopAutochecker() {
     emitStatusUpdate();
 }
 
+// --- PATCH: Pastikan monitorLiveInterval dan monitorConnectedInterval selalu didefinisikan ---
+let monitorLiveInterval = null;
+let monitorConnectedInterval = null;
+
 // Emit status update to all clients
 function emitStatusUpdate() {
     io.emit('statusUpdate', {
@@ -713,4 +864,369 @@ function emitAccountStatusUpdate() {
         offline: offlineAccounts,
         error: errorAccounts
     });
+}
+
+// --- SESSION ID GENERATION ---
+function generateSessionId(username, roomId, timestamp) {
+    const time = timestamp.getTime();
+    const hash = require('crypto').createHash('md5')
+        .update(`${username}-${roomId}-${time}`)
+        .digest('hex');
+    return `${username}_${time}_${hash.substring(0, 8)}`;
+}
+
+// --- UPDATE SESSION TRACKING ---
+function updateSessionTracking(username) {
+    const session = getCurrentSession(username);
+    if (session && session.status === 'live') {
+        session.last_update_time = new Date();
+        saveLiveDataToFile();
+    }
+}
+
+// --- MULTI-FACTOR SESSION DETECTION ---
+function checkIfSameSession(lastSession, newSessionData) {
+    if (!lastSession || lastSession.status !== 'live') {
+        return false; // Tidak ada sesi aktif atau sudah finalized
+    }
+    
+    const { roomId, createTime, currentTime, username } = newSessionData;
+    
+    // Factor 1: Room ID comparison
+    const sameRoomId = lastSession.room_id === roomId;
+    
+    // Factor 2: Time gap analysis
+    const maxSessionGap = 10 * 60 * 1000; // 10 menit
+    const lastUpdateTime = lastSession.last_update_time || 
+                          parseTimestampToDate(lastSession.timestamp_start);
+    const timeSinceLastUpdate = currentTime - lastUpdateTime;
+    const reasonableTimeGap = timeSinceLastUpdate < maxSessionGap;
+    
+    // Factor 3: Create time comparison (jika ada)
+    let createTimeMatches = true;
+    if (createTime && lastSession.create_time) {
+        const createTimeDiff = Math.abs(createTime - lastSession.create_time);
+        createTimeMatches = createTimeDiff < 60000; // 1 menit tolerance
+    }
+    
+    // Factor 4: Session duration validation
+    const sessionStartTime = parseTimestampToDate(lastSession.timestamp_start);
+    const sessionDuration = currentTime - sessionStartTime;
+    const maxReasonableSessionDuration = 12 * 60 * 60 * 1000; // 12 jam
+    const reasonableDuration = sessionDuration < maxReasonableSessionDuration;
+    
+    // Logging untuk debugging
+    console.log(`[SESSION-CHECK] ${username}:`, {
+        sameRoomId,
+        reasonableTimeGap: reasonableTimeGap ? 'YES' : 'NO',
+        timeSinceLastUpdate: Math.round(timeSinceLastUpdate / 1000) + 's',
+        createTimeMatches,
+        reasonableDuration,
+        sessionDuration: Math.round(sessionDuration / 60000) + 'm'
+    });
+    
+    // Decision logic
+    if (sameRoomId && reasonableTimeGap && createTimeMatches && reasonableDuration) {
+        return true; // Same session
+    }
+    
+    return false; // Different session
+}
+
+// Helper function to parse timestamp to Date
+function parseTimestampToDate(timestamp) {
+    if (!timestamp) return new Date();
+    const t = typeof timestamp === 'string' ? timestamp.replace(' ', 'T') : timestamp;
+    return new Date(t);
+}
+
+// --- END MULTI-FACTOR SESSION DETECTION ---
+
+// --- SESSION ANALYSIS API ---
+app.get('/api/session-analysis/:username', (req, res) => {
+    const { username } = req.params;
+    
+    // Analisis untuk satu user
+    const sessions = liveDataStore[username] || [];
+    const analysis = analyzeUserSessions(username, sessions);
+    res.json({ username, analysis });
+});
+
+app.get('/api/session-analysis', (req, res) => {
+    // Analisis untuk semua user
+    const allAnalysis = {};
+    for (const user in liveDataStore) {
+        const sessions = liveDataStore[user] || [];
+        allAnalysis[user] = analyzeUserSessions(user, sessions);
+    }
+    res.json(allAnalysis);
+});
+
+function analyzeUserSessions(username, sessions) {
+    if (!Array.isArray(sessions)) return { error: 'Invalid session data' };
+    
+    const analysis = {
+        total_sessions: sessions.length,
+        active_sessions: sessions.filter(s => s.status === 'live').length,
+        finalized_sessions: sessions.filter(s => s.status === 'finalized').length,
+        room_ids: [...new Set(sessions.map(s => s.room_id).filter(Boolean))],
+        session_details: [],
+        potential_issues: []
+    };
+    
+    // Analisis detail per session
+    sessions.forEach((session, index) => {
+        const detail = {
+            session_number: index + 1,
+            session_id: session.session_id,
+            room_id: session.room_id,
+            status: session.status,
+            start_time: session.timestamp_start,
+            end_time: session.timestamp_end,
+            duration: session.duration,
+            peak_viewer: session.peak_viewer,
+            total_gifts: session.total_diamond,
+            notes_count: session.session_notes?.length || 0
+        };
+        
+        // Deteksi potential issues
+        if (session.status === 'live' && session.last_update_time) {
+            const timeSinceUpdate = new Date() - session.last_update_time;
+            if (timeSinceUpdate > 30 * 60 * 1000) { // 30 menit
+                analysis.potential_issues.push({
+                    session_id: session.session_id,
+                    issue: 'Stale session - no updates for 30+ minutes',
+                    last_update: session.last_update_time
+                });
+            }
+        }
+        
+        analysis.session_details.push(detail);
+    });
+    
+    // Deteksi duplicate room IDs
+    const roomIdCounts = {};
+    sessions.forEach(s => {
+        if (s.room_id) {
+            roomIdCounts[s.room_id] = (roomIdCounts[s.room_id] || 0) + 1;
+        }
+    });
+    
+    Object.entries(roomIdCounts).forEach(([roomId, count]) => {
+        if (count > 1) {
+            analysis.potential_issues.push({
+                issue: `Room ID ${roomId} used in ${count} sessions`,
+                severity: 'warning'
+            });
+        }
+    });
+    
+    return analysis;
+}
+
+// --- RATE LIMITING SOLUTION ---
+class RateLimiter {
+    constructor(maxRequests = 5, timeWindow = 60000) { // 5 requests per minute
+        this.maxRequests = maxRequests;
+        this.timeWindow = timeWindow;
+        this.requests = [];
+        this.rateLimitInfo = null;
+        this.lastRateLimitCheck = 0;
+        this.maxRequestsPerMinute = RATE_LIMIT_REQUESTS_PER_MINUTE; // From environment
+        this.maxRequestsPerHour = RATE_LIMIT_REQUESTS_PER_HOUR; // From environment
+        this.requestDelay = RATE_LIMIT_REQUEST_DELAY; // From environment
+        this.rateLimitCheckInterval = EULERSTREAM_RATE_LIMIT_CHECK_INTERVAL; // From environment
+        this.adaptiveRateLimiting = EULERSTREAM_ADAPTIVE_RATE_LIMITING; // From environment
+        this.enabled = RATE_LIMIT_ENABLED; // From environment
+    }
+    
+    async checkRateLimits() {
+        // Skip if rate limiting is disabled
+        if (!this.enabled) return;
+        
+        // Check rate limits from EulerStream API every configured interval
+        const now = Date.now();
+        if (now - this.lastRateLimitCheck > this.rateLimitCheckInterval) {
+            try {
+                const { TikTokLiveConnection } = require('tiktok-live-connector');
+                const connection = new TikTokLiveConnection('temp_user');
+                
+                if (connection.webClient && connection.webClient.webSigner) {
+                    const rateLimitResponse = await connection.webClient.webSigner.webcast.getRateLimits();
+                    this.rateLimitInfo = rateLimitResponse.data;
+                    this.lastRateLimitCheck = now;
+                    
+                    if (LOG_ENHANCED_RATE_LIMITING) {
+                        console.log('[RATE-LIMIT] EulerStream limits:', {
+                            minute: `${this.rateLimitInfo.minute.remaining}/${this.rateLimitInfo.minute.max}`,
+                            hour: `${this.rateLimitInfo.hour.remaining}/${this.rateLimitInfo.hour.max}`,
+                            day: `${this.rateLimitInfo.day.remaining}/${this.rateLimitInfo.day.max}`
+                        });
+                    }
+                    
+                    // Update conservative limits based on remaining capacity (if adaptive enabled)
+                    if (this.adaptiveRateLimiting) {
+                        if (this.rateLimitInfo.minute.remaining < 5) {
+                            this.maxRequestsPerMinute = 2;
+                        } else if (this.rateLimitInfo.minute.remaining < 8) {
+                            this.maxRequestsPerMinute = 5;
+                        }
+                        
+                        if (this.rateLimitInfo.hour.remaining < 10) {
+                            this.maxRequestsPerHour = Math.max(5, Math.floor(this.rateLimitInfo.hour.remaining * 0.8));
+                        }
+                    }
+                }
+            } catch (error) {
+                if (LOG_ENHANCED_RATE_LIMITING) {
+                    console.log('[RATE-LIMIT] Could not check EulerStream limits:', error.message);
+                }
+            }
+        }
+    }
+    
+    async canMakeRequest() {
+        // Skip rate limiting if disabled
+        if (!this.enabled) {
+            return true;
+        }
+        
+        const now = Date.now();
+        const oneMinuteAgo = now - 60000;
+        const oneHourAgo = now - 3600000;
+        
+        // Check current rate limits from EulerStream
+        await this.checkRateLimits();
+        
+        // Clean old requests
+        this.requests = this.requests.filter(time => time > oneHourAgo);
+        
+        // Check if we're hitting EulerStream limits
+        if (this.rateLimitInfo) {
+            if (this.rateLimitInfo.hour.remaining <= 0) {
+                const resetTime = new Date(this.rateLimitInfo.hour.reset_at);
+                const waitTime = resetTime.getTime() - now;
+                if (waitTime > 0) {
+                    console.log(`[RATE-LIMIT] EulerStream hourly limit reached. Waiting ${Math.ceil(waitTime / 60000)} minutes until reset.`);
+                    await this.sleep(waitTime);
+                    return this.canMakeRequest();
+                }
+            }
+            
+            if (this.rateLimitInfo.minute.remaining <= 0) {
+                console.log('[RATE-LIMIT] EulerStream minute limit reached. Waiting 60 seconds.');
+                await this.sleep(60000);
+                return this.canMakeRequest();
+            }
+        }
+        
+        // Check minute rate limit
+        const recentRequests = this.requests.filter(time => time > oneMinuteAgo);
+        if (recentRequests.length >= this.maxRequestsPerMinute) {
+            const waitTime = (recentRequests[0] + 60000) - now;
+            console.log(`[RATE-LIMIT] Waiting ${Math.round(waitTime/1000)}s for minute limit`);
+            await this.sleep(waitTime);
+            return this.canMakeRequest();
+        }
+        
+        // Check hour rate limit
+        if (this.requests.length >= this.maxRequestsPerHour) {
+            const waitTime = (this.requests[0] + 3600000) - now;
+            console.log(`[RATE-LIMIT] Waiting ${Math.round(waitTime/1000)}s for hour limit`);
+            await this.sleep(waitTime);
+            return this.canMakeRequest();
+        }
+        
+        // Add delay between requests
+        await this.sleep(this.requestDelay);
+        
+        // Record this request
+        this.requests.push(now);
+        return true;
+    }
+
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    
+    getStatus() {
+        const now = Date.now();
+        const recentRequests = this.requests.filter(time => now - time < this.timeWindow);
+        const hourlyRequests = this.requests.filter(time => now - time < 3600000);
+        
+        return {
+            requests_made: recentRequests.length,
+            max_requests: this.maxRequests,
+            time_window_ms: this.timeWindow,
+            can_make_request: recentRequests.length < this.maxRequests,
+            hourly_requests: hourlyRequests.length,
+            max_hourly_requests: this.maxRequestsPerHour,
+            eulerstream_limits: this.rateLimitInfo
+        };
+    }
+}
+
+// Global rate limiter instance
+const tikTokRateLimiter = new RateLimiter(
+    RATE_LIMIT_ENABLED ? RATE_LIMIT_REQUESTS_PER_MINUTE : 100, // Higher limit if disabled
+    120000 // 2 minutes window
+);
+
+// Helper function for delayed connection
+async function connectWithRateLimit(username) {
+    await tikTokRateLimiter.canMakeRequest();
+    
+    let connection = activeConnections[username];
+    if (!connection) {
+        connection = new WebcastPushConnection(username);
+        activeConnections[username] = connection;
+    }
+    
+    try {
+        await connection.connect();
+        return { success: true, connection };
+    } catch (error) {
+        if (error.status === 429 || error.message?.includes('rate limit')) {
+            console.log(`[RATE-LIMIT] ${username}: Rate limited, will retry later`);
+            throw new Error('RATE_LIMITED');
+        }
+        throw error;
+    }
+}
+
+// Enhanced batch processing
+async function processAccountsBatch(accounts, batchSize = 2) {
+    const results = { live: [], offline: [], error: [] };
+    
+    for (let i = 0; i < accounts.length; i += batchSize) {
+        const batch = accounts.slice(i, i + batchSize);
+        console.log(`[BATCH] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(accounts.length/batchSize)}: ${batch.join(', ')}`);
+        
+        for (const username of batch) {
+            try {
+                const result = await connectWithRateLimit(username);
+                if (!liveAccounts.includes(username)) liveAccounts.push(username);
+                results.live.push(username);
+                console.log(`✅ ${username} is LIVE`);
+            } catch (error) {
+                if (error.message === 'RATE_LIMITED') {
+                    results.error.push(username);
+                } else if (error.message && error.message.includes("isn't online")) {
+                    results.offline.push(username);
+                    console.log(`❌ ${username} is OFFLINE`);
+                } else {
+                    results.error.push(username);
+                    console.log(`⚠️ ${username} ERROR: ${error.message}`);
+                }
+            }
+        }
+        
+        // Delay between batches
+        if (i + batchSize < accounts.length) {
+            console.log(`[BATCH] Waiting 10 seconds before next batch...`);
+            await new Promise(resolve => setTimeout(resolve, 10000));
+        }
+    }
+    
+    return results;
 }
