@@ -173,6 +173,82 @@ async function saveDataToSupabase(liveDataStore) {
     return await backupToSupabase(liveDataStore);
 }
 
+// Get Supabase flags (for persistence across updates)
+async function getSupabaseFlag(flagName) {
+    if (!useSupabase || !supabase) return null;
+    
+    try {
+        const { data, error } = await supabase
+            .from('flags')
+            .select('value')
+            .eq('name', flagName)
+            .single();
+        
+        if (error) {
+            if (error.code === 'PGRST116') {
+                // Flag not found, return null
+                return null;
+            }
+            console.error(`❌ Error reading flag ${flagName}:`, error);
+            return null;
+        }
+        
+        return data ? data.value : null;
+    } catch (error) {
+        console.error(`❌ Error getting flag ${flagName}:`, error);
+        return null;
+    }
+}
+
+// Set Supabase flags
+async function setSupabaseFlag(flagName, value) {
+    if (!useSupabase || !supabase) return false;
+    
+    try {
+        const { error } = await supabase
+            .from('flags')
+            .upsert({
+                name: flagName,
+                value: value,
+                updated_at: new Date().toISOString()
+            }, {
+                onConflict: 'name'
+            });
+        
+        if (error) {
+            console.error(`❌ Error setting flag ${flagName}:`, error);
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        console.error(`❌ Error setting flag ${flagName}:`, error);
+        return false;
+    }
+}
+
+// Delete Supabase flags
+async function deleteSupabaseFlag(flagName) {
+    if (!useSupabase || !supabase) return false;
+    
+    try {
+        const { error } = await supabase
+            .from('flags')
+            .delete()
+            .eq('name', flagName);
+        
+        if (error) {
+            console.error(`❌ Error deleting flag ${flagName}:`, error);
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        console.error(`❌ Error deleting flag ${flagName}:`, error);
+        return false;
+    }
+}
+
 // Get Supabase status
 function getSupabaseStatus() {
     return {
@@ -189,5 +265,8 @@ module.exports = {
     loadDataFromSupabase,
     backupToSupabase,
     getSupabaseStatus,
+    getSupabaseFlag,
+    setSupabaseFlag,
+    deleteSupabaseFlag,
     useSupabase: () => useSupabase
 };

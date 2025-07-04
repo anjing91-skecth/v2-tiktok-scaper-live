@@ -21,7 +21,7 @@ const PORT = process.env.PORT || 3000;
 const RATE_LIMIT_ENABLED = process.env.RATE_LIMIT_ENABLED !== 'false';
 const RATE_LIMIT_REQUESTS_PER_MINUTE = parseInt(process.env.RATE_LIMIT_REQUESTS_PER_MINUTE) || 8;
 const RATE_LIMIT_REQUESTS_PER_HOUR = parseInt(process.env.RATE_LIMIT_REQUESTS_PER_HOUR) || 50;
-const RATE_LIMIT_REQUEST_DELAY = parseInt(process.env.RATE_LIMIT_REQUEST_DELAY) || 1000;
+const RATE_LIMIT_REQUESTS_PER_DELAY = parseInt(process.env.RATE_LIMIT_REQUESTS_PER_DELAY) || 1000;
 
 // Session Detection Configuration
 const SESSION_DETECTION_ENABLED = process.env.SESSION_DETECTION_ENABLED !== 'false';
@@ -77,6 +77,14 @@ const io = new Server(httpServer, {
 
 // Clear log file on startup
 fs.writeFileSync(logFilePath, '');
+
+// Load and mount routes
+const downloadDataRouter = require('./routes/downloadData');
+downloadDataRouter.injectState({
+    saveLiveDataToCSV: () => saveLiveDataToCSV(),
+    csvFilePath: csvFilePath
+});
+app.use('/api', downloadDataRouter.router);
 
 // Serve the frontend
 app.get('/', (req, res) => {
@@ -159,13 +167,35 @@ async function initializeServer() {
         errorAccounts = [];
         console.log(`📋 All ${usernames.length} accounts initialized as offline on server start.`);
         
-        // Load autorecover status from file
-        if (fs.existsSync(autorecoverFile)) {
-            autorecover = true;
-            console.log('🔄 Autorecover flag detected - Auto-recovery enabled');
-        } else {
-            autorecover = false;
-            console.log('ℹ️  No autorecover flag - Auto-recovery disabled');
+        // Load autorecover status from Supabase first, then file as fallback
+        console.log('🔄 Loading autorecover status...');
+        
+        // Try Supabase first
+        if (supabaseClient.useSupabase()) {
+            const supabaseAutorecoverFlag = await supabaseClient.getSupabaseFlag('autorecover');
+            if (supabaseAutorecoverFlag !== null) {
+                autorecover = supabaseAutorecoverFlag === 'true' || supabaseAutorecoverFlag === true;
+                console.log(`📦 Autorecover status from Supabase: ${autorecover ? 'Enabled' : 'Disabled'}`);
+            } else {
+                console.log('ℹ️ No autorecover flag found in Supabase');
+            }
+        }
+        
+        // If not found in Supabase, try local file as fallback
+        if (!supabaseClient.useSupabase() || await supabaseClient.getSupabaseFlag('autorecover') === null) {
+            if (fs.existsSync(autorecoverFile)) {
+                autorecover = true;
+                console.log('� Autorecover flag detected from local file - Auto-recovery enabled');
+                
+                // Migrate to Supabase if available
+                if (supabaseClient.useSupabase()) {
+                    await supabaseClient.setSupabaseFlag('autorecover', 'true');
+                    console.log('📦 Migrated autorecover flag to Supabase');
+                }
+            } else {
+                autorecover = false;
+                console.log('ℹ️ No autorecover flag found - Auto-recovery disabled');
+            }
         }
         
         // Display comprehensive system status
@@ -192,15 +222,6 @@ async function initializeServer() {
         
         // Migrate data format if needed
         migrateLiveDataStoreFormat();
-        
-        // Load autorecover status from file
-        if (fs.existsSync(autorecoverFile)) {
-            autorecover = true;
-            console.log('✅ Autorecover flag detected - Auto-recovery enabled');
-        } else {
-            autorecover = false;
-            console.log('ℹ️ No autorecover flag - Auto-recovery disabled');
-        }
         
     } catch (e) {
         console.error('Failed to initialize server:', e.message);
@@ -270,12 +291,20 @@ app.post('/api/check-live', async (req, res) => {
 });
 
 // Start scraping: attach listeners to existing connections, move to connected
-app.post('/api/start-scraping-all', (req, res) => {
+app.post('/api/start-scraping-all', async (req, res) => {
     // PATCH: Jangan return error jika liveAccounts.length === 0
     // isMonitoring harus tetap true meskipun tidak ada akun live
     isMonitoring = true;
     autorecover = true;
+    
+    // Save autorecover flag to both Supabase and file
+    if (supabaseClient.useSupabase()) {
+        await supabaseClient.setSupabaseFlag('autorecover', 'true');
+        console.log('📦 Autorecover flag saved to Supabase');
+    }
     fs.writeFileSync(autorecoverFile, 'on');
+    console.log('📄 Autorecover flag saved to local file');
+    
     // Tetap jalankan autochecker jika ada akun offline
     if (offlineAccounts.length > 0) {
         startAutochecker();
@@ -302,10 +331,20 @@ app.post('/api/start-scraping-all', (req, res) => {
 });
 
 // Stop monitoring
-app.post('/api/stop-monitoring', (req, res) => {
+app.post('/api/stop-monitoring', async (req, res) => {
     isMonitoring = false;
     autorecover = false;
-    if (fs.existsSync(autorecoverFile)) fs.unlinkSync(autorecoverFile);
+    
+    // Remove autorecover flag from both Supabase and file
+    if (supabaseClient.useSupabase()) {
+        await supabaseClient.deleteSupabaseFlag('autorecover');
+        console.log('📦 Autorecover flag removed from Supabase');
+    }
+    if (fs.existsSync(autorecoverFile)) {
+        fs.unlinkSync(autorecoverFile);
+        console.log('📄 Autorecover flag removed from local file');
+    }
+    
     // Disconnect all active connections
     for (const uname in activeConnections) {
         try {
@@ -366,6 +405,103 @@ app.get('/api/get-list', (req, res) => {
         res.json({ usernames });
     } catch (error) {
         res.status(500).json({ error: 'Failed to read username list.' });
+    }
+});
+
+// --- FLAG MANAGEMENT API ---
+// Get flag status
+app.get('/api/flag/:flagName', async (req, res) => {
+    const { flagName } = req.params;
+    
+    try {
+        let value = null;
+        
+        // Try Supabase first
+        if (supabaseClient.useSupabase()) {
+            value = await supabaseClient.getSupabaseFlag(flagName);
+        }
+        
+        // If not found in Supabase, try local file for specific flags
+        if (value === null && flagName === 'autorecover') {
+            value = fs.existsSync(autorecoverFile) ? 'true' : 'false';
+        }
+        
+        res.json({ 
+            flag: flagName, 
+            value: value,
+            source: value !== null ? (supabaseClient.useSupabase() ? 'supabase' : 'file') : 'none'
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Set flag
+app.post('/api/flag/:flagName', async (req, res) => {
+    const { flagName } = req.params;
+    const { value } = req.body;
+    
+    try {
+        let success = false;
+        
+        // Save to Supabase if available
+        if (supabaseClient.useSupabase()) {
+            success = await supabaseClient.setSupabaseFlag(flagName, value);
+        }
+        
+        // Handle specific flags with file fallback
+        if (flagName === 'autorecover') {
+            if (value === 'true' || value === true) {
+                fs.writeFileSync(autorecoverFile, 'on');
+                autorecover = true;
+            } else {
+                if (fs.existsSync(autorecoverFile)) {
+                    fs.unlinkSync(autorecoverFile);
+                }
+                autorecover = false;
+            }
+            success = true;
+        }
+        
+        res.json({ 
+            flag: flagName, 
+            value: value,
+            success: success,
+            saved_to: supabaseClient.useSupabase() ? 'supabase_and_file' : 'file_only'
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Delete flag
+app.delete('/api/flag/:flagName', async (req, res) => {
+    const { flagName } = req.params;
+    
+    try {
+        let success = false;
+        
+        // Delete from Supabase if available
+        if (supabaseClient.useSupabase()) {
+            success = await supabaseClient.deleteSupabaseFlag(flagName);
+        }
+        
+        // Handle specific flags with file cleanup
+        if (flagName === 'autorecover') {
+            if (fs.existsSync(autorecoverFile)) {
+                fs.unlinkSync(autorecoverFile);
+            }
+            autorecover = false;
+            success = true;
+        }
+        
+        res.json({ 
+            flag: flagName, 
+            deleted: success,
+            cleaned_from: supabaseClient.useSupabase() ? 'supabase_and_file' : 'file_only'
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
@@ -1277,7 +1413,7 @@ const tikTokRateLimiter = {
     hourlyRequests: [],
     maxRequestsPerMinute: RATE_LIMIT_REQUESTS_PER_MINUTE,
     maxRequestsPerHour: RATE_LIMIT_REQUESTS_PER_HOUR,
-    requestDelay: RATE_LIMIT_REQUEST_DELAY,
+    requestDelay: RATE_LIMIT_REQUESTS_PER_DELAY,
     
     async canMakeRequest() {
         const now = Date.now();
