@@ -427,12 +427,27 @@ function initLiveData(username, metadata) {
         timestampStart = formatDateToGMT7(new Date());
     }
     
-    const roomId = metadata && metadata.roomId ? metadata.roomId : null;
+    // Defensive: Always extract Room ID as string, fallback to null
+    let roomId = null;
+    if (metadata && (metadata.roomId || metadata.room_id)) {
+        roomId = String(metadata.roomId || metadata.room_id);
+    }
+    if (!roomId) {
+        console.warn(`[SESSION-INIT] ${username}: WARNING - Room ID missing in metadata!`);
+    }
+    // Extra logging for debugging
+    console.log(`[SESSION-INIT] ${username}: Room ID extracted:`, roomId, '| Metadata:', JSON.stringify(metadata));
     const currentTime = new Date();
     
     // Get existing sessions
     let sessions = liveDataStore[username] || [];
     let lastSession = sessions[sessions.length - 1];
+    
+    console.log(`[SESSION-INIT] ${username}: Checking session for Room ID: ${roomId}`);
+    console.log(`[SESSION-INIT] ${username}: Existing sessions: ${sessions.length}`);
+    if (lastSession) {
+        console.log(`[SESSION-INIT] ${username}: Last session - Room: ${lastSession.room_id}, Status: ${lastSession.status}`);
+    }
     
     // --- MULTI-FACTOR SESSION DETECTION ---
     const isSameSession = checkIfSameSession(lastSession, {
@@ -444,13 +459,14 @@ function initLiveData(username, metadata) {
     
     if (isSameSession) {
         // Lanjutkan sesi yang sama
-        console.log(`[SESSION] Continuing existing session for ${username} (Room: ${roomId})`);
+        console.log(`[SESSION] ✅ Continuing existing session for ${username} (Room: ${roomId})`);
         return;
     }
     
     // Jika ada sesi live aktif yang berbeda, finalize dulu
     if (lastSession && lastSession.status === 'live') {
-        console.log(`[SESSION] Finalizing previous session for ${username} (New session detected)`);
+        console.log(`[SESSION] 🔄 Finalizing previous session for ${username} (New session detected)`);
+        console.log(`[SESSION] Previous: Room ${lastSession.room_id} → New: Room ${roomId}`);
         finalizeLiveData(username);
     }
     // Buat sesi baru dengan data yang lebih lengkap
@@ -483,14 +499,17 @@ function initLiveData(username, metadata) {
         note: `Session started - Room: ${roomId}, Method: ${metadata?.method || 'auto'}`
     });
     
-    console.log(`[SESSION] New session created for ${username}:`, {
-        session_id: newSession.session_id,
-        room_id: roomId,
-        timestamp_start: timestampStart
-    });
     if (!Array.isArray(liveDataStore[username])) liveDataStore[username] = [];
     liveDataStore[username].push(newSession);
     processedGiftMsgIds[username] = new Set();
+    
+    console.log(`[SESSION] 🎉 NEW SESSION CREATED for ${username}:`);
+    console.log(`   • Session ID: ${newSession.session_id}`);
+    console.log(`   • Room ID: ${roomId}`);
+    console.log(`   • Start Time: ${timestampStart}`);
+    console.log(`   • Total Sessions: ${liveDataStore[username].length}`);
+    console.log(`   • Status: ${newSession.status}`);
+    
     saveLiveDataToFile();
 }
 
@@ -955,45 +974,47 @@ function checkIfSameSession(lastSession, newSessionData) {
     
     const { roomId, createTime, currentTime, username } = newSessionData;
     
-    // Factor 1: Room ID comparison
-    const sameRoomId = lastSession.room_id === roomId;
+    // PRIMARY RULE: Room ID MUST match for same session
+    // If Room ID is different, it's ALWAYS a new session
+    if (!roomId || !lastSession.room_id || lastSession.room_id !== roomId) {
+        console.log(`[SESSION-CHECK] ${username}: DIFFERENT Room ID - Creating NEW session`);
+        console.log(`   • Previous Room ID: ${lastSession.room_id}`);
+        console.log(`   • New Room ID: ${roomId}`);
+        return false; // Different room = new session
+    }
     
-    // Factor 2: Time gap analysis
-    const maxSessionGap = 10 * 60 * 1000; // 10 menit
+    // If Room ID is the same, check other factors
+    const sameRoomId = true; // Already confirmed above
+    
+    // Factor 2: Time gap analysis (only for same room ID)
+    const maxSessionGap = 30 * 60 * 1000; // 30 menit (increased tolerance)
     const lastUpdateTime = lastSession.last_update_time || 
                           parseTimestampToDate(lastSession.timestamp_start);
     const timeSinceLastUpdate = currentTime - lastUpdateTime;
     const reasonableTimeGap = timeSinceLastUpdate < maxSessionGap;
     
-    // Factor 3: Create time comparison (jika ada)
-    let createTimeMatches = true;
-    if (createTime && lastSession.create_time) {
-        const createTimeDiff = Math.abs(createTime - lastSession.create_time);
-        createTimeMatches = createTimeDiff < 60000; // 1 menit tolerance
-    }
-    
-    // Factor 4: Session duration validation
+    // Factor 3: Session duration validation
     const sessionStartTime = parseTimestampToDate(lastSession.timestamp_start);
     const sessionDuration = currentTime - sessionStartTime;
-    const maxReasonableSessionDuration = 12 * 60 * 60 * 1000; // 12 jam
+    const maxReasonableSessionDuration = 24 * 60 * 60 * 1000; // 24 jam (increased tolerance)
     const reasonableDuration = sessionDuration < maxReasonableSessionDuration;
     
     // Logging untuk debugging
-    console.log(`[SESSION-CHECK] ${username}:`, {
-        sameRoomId,
-        reasonableTimeGap: reasonableTimeGap ? 'YES' : 'NO',
-        timeSinceLastUpdate: Math.round(timeSinceLastUpdate / 1000) + 's',
-        createTimeMatches,
-        reasonableDuration,
-        sessionDuration: Math.round(sessionDuration / 60000) + 'm'
-    });
+    console.log(`[SESSION-CHECK] ${username}: SAME Room ID - Checking continuation`);
+    console.log(`   • Room ID: ${roomId}`);
+    console.log(`   • Time since last update: ${Math.round(timeSinceLastUpdate / 1000)}s`);
+    console.log(`   • Session duration: ${Math.round(sessionDuration / 60000)}m`);
+    console.log(`   • Reasonable time gap: ${reasonableTimeGap ? 'YES' : 'NO'}`);
+    console.log(`   • Reasonable duration: ${reasonableDuration ? 'YES' : 'NO'}`);
     
-    // Decision logic
-    if (sameRoomId && reasonableTimeGap && createTimeMatches && reasonableDuration) {
+    // Decision logic for same room ID
+    if (reasonableTimeGap && reasonableDuration) {
+        console.log(`[SESSION-CHECK] ${username}: CONTINUING existing session`);
         return true; // Same session
+    } else {
+        console.log(`[SESSION-CHECK] ${username}: Time gap/duration exceeded - Creating NEW session`);
+        return false; // New session even with same room ID
     }
-    
-    return false; // Different session
 }
 
 // Helper function to parse timestamp to Date
@@ -1085,499 +1106,392 @@ function analyzeUserSessions(username, sessions) {
     return analysis;
 }
 
-// --- RATE LIMITING SOLUTION ---
-class RateLimiter {
-    constructor(maxRequests = 5, timeWindow = 60000) { // 5 requests per minute
-        this.maxRequests = maxRequests;
-        this.timeWindow = timeWindow;
-        this.requests = [];
-        this.rateLimitInfo = null;
-        this.lastRateLimitCheck = 0;
-        this.maxRequestsPerMinute = RATE_LIMIT_REQUESTS_PER_MINUTE; // From environment
-        this.maxRequestsPerHour = RATE_LIMIT_REQUESTS_PER_HOUR; // From environment
-        this.requestDelay = RATE_LIMIT_REQUEST_DELAY; // From environment
-        this.rateLimitCheckInterval = EULERSTREAM_RATE_LIMIT_CHECK_INTERVAL; // From environment
-        this.adaptiveRateLimiting = EULERSTREAM_ADAPTIVE_RATE_LIMITING; // From environment
-        this.enabled = RATE_LIMIT_ENABLED; // From environment
+// --- SESSION COUNT ANALYSIS API ---
+app.get('/api/session-count/:username', (req, res) => {
+    const { username } = req.params;
+    const { date } = req.query; // Format: YYYY-MM-DD
+    
+    const sessions = liveDataStore[username] || [];
+    if (!Array.isArray(sessions)) {
+        return res.json({ error: 'No sessions found for user' });
     }
     
-    async checkRateLimits() {
-        // Skip if rate limiting is disabled
-        if (!this.enabled) return;
+    let filteredSessions = sessions;
+    
+    // Filter by date if provided
+    if (date) {
+        filteredSessions = sessions.filter(session => {
+            if (!session.timestamp_start) return false;
+            const sessionDate = session.timestamp_start.split(' ')[0]; // Get DD/MM/YYYY part
+            const [day, month, year] = sessionDate.split('/');
+            const sessionDateFormatted = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+            return sessionDateFormatted === date;
+        });
+    }
+    
+    const analysis = {
+        username,
+        date: date || 'all',
+        total_sessions: filteredSessions.length,
+        active_sessions: filteredSessions.filter(s => s.status === 'live').length,
+        finalized_sessions: filteredSessions.filter(s => s.status === 'finalized').length,
+        sessions: filteredSessions.map(session => ({
+            session_id: session.session_id,
+            room_id: session.room_id,
+            start_time: session.timestamp_start,
+            end_time: session.timestamp_end,
+            duration: session.duration,
+            status: session.status,
+            peak_viewer: session.peak_viewer,
+            total_diamond: session.total_diamond
+        }))
+    };
+    
+    res.json(analysis);
+});
+
+app.get('/api/daily-session-summary', (req, res) => {
+    const { date } = req.query; // Format: YYYY-MM-DD
+    const summary = {};
+    
+    for (const username in liveDataStore) {
+        const sessions = liveDataStore[username] || [];
+        if (!Array.isArray(sessions)) continue;
         
-        // Check rate limits from EulerStream API every configured interval
-        const now = Date.now();
-        if (now - this.lastRateLimitCheck > this.rateLimitCheckInterval) {
-            try {
-                const { TikTokLiveConnection } = require('tiktok-live-connector');
-                const connection = new TikTokLiveConnection('temp_user');
-                
-                if (connection.webClient && connection.webClient.webSigner) {
-                    const rateLimitResponse = await connection.webClient.webSigner.webcast.getRateLimits();
-                    this.rateLimitInfo = rateLimitResponse.data;
-                    this.lastRateLimitCheck = now;
-                    
-                    if (LOG_ENHANCED_RATE_LIMITING) {
-                        console.log('[RATE-LIMIT] EulerStream limits:', {
-                            minute: `${this.rateLimitInfo.minute.remaining}/${this.rateLimitInfo.minute.max}`,
-                            hour: `${this.rateLimitInfo.hour.remaining}/${this.rateLimitInfo.hour.max}`,
-                            day: `${this.rateLimitInfo.day.remaining}/${this.rateLimitInfo.day.max}`
-                        });
-                    }
-                    
-                    // Update conservative limits based on remaining capacity (if adaptive enabled)
-                    if (this.adaptiveRateLimiting) {
-                        if (this.rateLimitInfo.minute.remaining < 5) {
-                            this.maxRequestsPerMinute = 2;
-                        } else if (this.rateLimitInfo.minute.remaining < 8) {
-                            this.maxRequestsPerMinute = 5;
-                        }
-                        
-                        if (this.rateLimitInfo.hour.remaining < 10) {
-                            this.maxRequestsPerHour = Math.max(5, Math.floor(this.rateLimitInfo.hour.remaining * 0.8));
-                        }
-                    }
-                }
-            } catch (error) {
-                if (LOG_ENHANCED_RATE_LIMITING) {
-                    console.log('[RATE-LIMIT] Could not check EulerStream limits:', error.message);
-                }
-            }
+        let filteredSessions = sessions;
+        
+        // Filter by date if provided
+        if (date) {
+            filteredSessions = sessions.filter(session => {
+                if (!session.timestamp_start) return false;
+                const sessionDate = session.timestamp_start.split(' ')[0]; // Get DD/MM/YYYY part
+                const [day, month, year] = sessionDate.split('/');
+                const sessionDateFormatted = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                return sessionDateFormatted === date;
+            });
+        }
+        
+        if (filteredSessions.length > 0) {
+            summary[username] = {
+                total_sessions: filteredSessions.length,
+                active_sessions: filteredSessions.filter(s => s.status === 'live').length,
+                finalized_sessions: filteredSessions.filter(s => s.status === 'finalized').length,
+                room_ids: [...new Set(filteredSessions.map(s => s.room_id).filter(Boolean))],
+                total_diamonds: filteredSessions.reduce((sum, s) => sum + (s.total_diamond || 0), 0),
+                peak_viewers: Math.max(...filteredSessions.map(s => s.peak_viewer || 0))
+            };
         }
     }
+    
+    res.json({
+        date: date || 'all',
+        users: Object.keys(summary).length,
+        total_sessions: Object.values(summary).reduce((sum, user) => sum + user.total_sessions, 0),
+        summary
+    });
+});
+
+// CSV Export Function
+function saveLiveDataToCSV() {
+    if (!process.env.CSV_EXPORT_ENABLED || process.env.CSV_EXPORT_ENABLED === 'false') {
+        return; // Skip CSV export if disabled
+    }
+    
+    try {
+        const csvData = [];
+        
+        // CSV headers
+        csvData.push([
+            'username',
+            'session_id',
+            'room_id',
+            'timestamp_start',
+            'timestamp_end',
+            'duration',
+            'duration_monitored',
+            'status',
+            'viewer_current',
+            'peak_viewer',
+            'total_diamond',
+            'connection_attempts',
+            'session_notes_count'
+        ].join(','));
+        
+        // Process each user's sessions
+        for (const username in liveDataStore) {
+            const userSessions = liveDataStore[username];
+            if (Array.isArray(userSessions)) {
+                userSessions.forEach(session => {
+                    const row = [
+                        username,
+                        session.session_id || '',
+                        session.room_id || '',
+                        session.timestamp_start || '',
+                        session.timestamp_end || '',
+                        session.duration || '',
+                        session.duration_monitored || '',
+                        session.status || '',
+                        session.viewer || 0,
+                        session.peak_viewer || 0,
+                        session.total_diamond || 0,
+                        session.connection_attempts || 0,
+                        session.session_notes?.length || 0
+                    ];
+                    csvData.push(row.join(','));
+                });
+            } else if (typeof userSessions === 'object' && userSessions !== null) {
+                // Handle legacy single session format
+                const session = userSessions;
+                const row = [
+                    username,
+                    session.session_id || '',
+                    session.room_id || '',
+                    session.timestamp_start || '',
+                    session.timestamp_end || '',
+                    session.duration || '',
+                    session.duration_monitored || '',
+                    session.status || '',
+                    session.viewer || 0,
+                    session.peak_viewer || 0,
+                    session.total_diamond || 0,
+                    session.connection_attempts || 0,
+                    session.session_notes?.length || 0
+                ];
+                csvData.push(row.join(','));
+            }
+        }
+        
+        // Write CSV file
+        const csvContent = csvData.join('\n');
+        fs.writeFileSync(csvFilePath, csvContent);
+        console.log(`📊 CSV exported: ${csvData.length - 1} session records`);
+        
+    } catch (error) {
+        console.error('❌ Failed to save CSV:', error.message);
+    }
+}
+
+// --- RATE LIMITER ---
+const tikTokRateLimiter = {
+    requests: [],
+    hourlyRequests: [],
+    maxRequestsPerMinute: RATE_LIMIT_REQUESTS_PER_MINUTE,
+    maxRequestsPerHour: RATE_LIMIT_REQUESTS_PER_HOUR,
+    requestDelay: RATE_LIMIT_REQUEST_DELAY,
     
     async canMakeRequest() {
-        // Skip rate limiting if disabled
-        if (!this.enabled) {
-            return true;
-        }
-        
         const now = Date.now();
-        const oneMinuteAgo = now - 60000;
-        const oneHourAgo = now - 3600000;
         
-        // Check current rate limits from EulerStream
-        await this.checkRateLimits();
+        // Clean old requests (older than 1 minute)
+        this.requests = this.requests.filter(time => now - time < 60000);
         
-        // Clean old requests
-        this.requests = this.requests.filter(time => time > oneHourAgo);
+        // Clean old hourly requests (older than 1 hour)
+        this.hourlyRequests = this.hourlyRequests.filter(time => now - time < 3600000);
         
-        // Check if we're hitting EulerStream limits
-        if (this.rateLimitInfo) {
-            if (this.rateLimitInfo.hour.remaining <= 0) {
-                const resetTime = new Date(this.rateLimitInfo.hour.reset_at);
-                const waitTime = resetTime.getTime() - now;
-                if (waitTime > 0) {
-                    console.log(`[RATE-LIMIT] EulerStream hourly limit reached. Waiting ${Math.ceil(waitTime / 60000)} minutes until reset.`);
-                    await this.sleep(waitTime);
-                    return this.canMakeRequest();
-                }
-            }
-            
-            if (this.rateLimitInfo.minute.remaining <= 0) {
-                console.log('[RATE-LIMIT] EulerStream minute limit reached. Waiting 60 seconds.');
-                await this.sleep(60000);
-                return this.canMakeRequest();
-            }
-        }
-        
-        // Check minute rate limit
-        const recentRequests = this.requests.filter(time => time > oneMinuteAgo);
-        if (recentRequests.length >= this.maxRequestsPerMinute) {
-            const waitTime = (recentRequests[0] + 60000) - now;
-            console.log(`[RATE-LIMIT] Waiting ${Math.round(waitTime/1000)}s for minute limit`);
-            await this.sleep(waitTime);
+        // Check if we can make a request
+        if (this.requests.length >= this.maxRequestsPerMinute) {
+            const waitTime = 60000 - (now - this.requests[0]);
+            console.log(`⏱️  Rate limit reached, waiting ${Math.ceil(waitTime/1000)}s`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
             return this.canMakeRequest();
         }
         
-        // Check hour rate limit
-        if (this.requests.length >= this.maxRequestsPerHour) {
-            const waitTime = (this.requests[0] + 3600000) - now;
-            console.log(`[RATE-LIMIT] Waiting ${Math.round(waitTime/1000)}s for hour limit`);
-            await this.sleep(waitTime);
+        if (this.hourlyRequests.length >= this.maxRequestsPerHour) {
+            const waitTime = 3600000 - (now - this.hourlyRequests[0]);
+            console.log(`⏱️  Hourly rate limit reached, waiting ${Math.ceil(waitTime/1000/60)}m`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
             return this.canMakeRequest();
         }
         
-        // Add delay between requests
-        await this.sleep(this.requestDelay);
-        
-        // Record this request
+        // Record the request
         this.requests.push(now);
+        this.hourlyRequests.push(now);
+        
+        // Apply delay between requests
+        if (this.requestDelay > 0) {
+            await new Promise(resolve => setTimeout(resolve, this.requestDelay));
+        }
+        
         return true;
-    }
-
-    sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
+    },
     
     getStatus() {
         const now = Date.now();
-        const recentRequests = this.requests.filter(time => now - time < this.timeWindow);
-        const hourlyRequests = this.requests.filter(time => now - time < 3600000);
+        const recentRequests = this.requests.filter(time => now - time < 60000);
+        const recentHourlyRequests = this.hourlyRequests.filter(time => now - time < 3600000);
         
         return {
             requests_made: recentRequests.length,
-            max_requests: this.maxRequests,
-            time_window_ms: this.timeWindow,
-            can_make_request: recentRequests.length < this.maxRequests,
-            hourly_requests: hourlyRequests.length,
+            max_requests: this.maxRequestsPerMinute,
+            hourly_requests: recentHourlyRequests.length,
             max_hourly_requests: this.maxRequestsPerHour,
-            eulerstream_limits: this.rateLimitInfo
+            delay_ms: this.requestDelay
         };
     }
-}
+};
 
-// Global rate limiter instance
-const tikTokRateLimiter = new RateLimiter(
-    RATE_LIMIT_ENABLED ? RATE_LIMIT_REQUESTS_PER_MINUTE : 100, // Higher limit if disabled
-    120000 // 2 minutes window
-);
-
-// Helper function for delayed connection
-async function connectWithRateLimit(username) {
-    await tikTokRateLimiter.canMakeRequest();
-    
-    let connection = activeConnections[username];
-    if (!connection) {
-        connection = new WebcastPushConnection(username);
-        activeConnections[username] = connection;
-    }
-    
-    try {
-        await connection.connect();
-        return { success: true, connection };
-    } catch (error) {
-        if (error.status === 429 || error.message?.includes('rate limit')) {
-            console.log(`[RATE-LIMIT] ${username}: Rate limited, will retry later`);
-            throw new Error('RATE_LIMITED');
-        }
-        throw error;
-    }
-}
-
-// Enhanced batch processing
-async function processAccountsBatch(accounts, batchSize = 2) {
-    const results = { live: [], offline: [], error: [] };
-    
-    for (let i = 0; i < accounts.length; i += batchSize) {
-        const batch = accounts.slice(i, i + batchSize);
-        console.log(`[BATCH] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(accounts.length/batchSize)}: ${batch.join(', ')}`);
-        
-        for (const username of batch) {
-            try {
-                const result = await connectWithRateLimit(username);
-                if (!liveAccounts.includes(username)) liveAccounts.push(username);
-                results.live.push(username);
-                console.log(`✅ ${username} is LIVE`);
-            } catch (error) {
-                if (error.message === 'RATE_LIMITED') {
-                    results.error.push(username);
-                } else if (error.message && error.message.includes("isn't online")) {
-                    results.offline.push(username);
-                    console.log(`❌ ${username} is OFFLINE`);
-                } else {
-                    results.error.push(username);
-                    console.log(`⚠️ ${username} ERROR: ${error.message}`);
-                }
-            }
-        }
-        
-        // Delay between batches
-        if (i + batchSize < accounts.length) {
-            console.log(`[BATCH] Waiting 10 seconds before next batch...`);
-            await new Promise(resolve => setTimeout(resolve, 10000));
-        }
-    }
-    
-    return results;
-}
-
-// API to initialize accounts and get current status on page load
-app.post('/api/initialize-accounts', (req, res) => {
-    // Send current status to help frontend initialize properly
-    res.json({
-        success: true,
-        message: 'Accounts initialized',
-        status: {
-            autochecker: typeof autocheckerActive !== 'undefined' ? autocheckerActive : false,
-            monitoring: typeof isMonitoring !== 'undefined' ? isMonitoring : false,
-            scraping: typeof isMonitoring !== 'undefined' && isMonitoring,
-            autorecover: typeof autorecover !== 'undefined' ? autorecover : false
-        },
-        accounts: {
-            online: liveAccounts,
-            offline: offlineAccounts,
-            error: errorAccounts
-        },
-        liveData: liveDataStore
-    });
-});
-
-// Calculate hash of liveDataStore for deduplication
-function calculateDataHash(data) {
-    return crypto.createHash('md5').update(JSON.stringify(data)).digest('hex');
-}
-
-// Optimized Supabase backup with batching, debouncing, and deduplication
-async function performOptimizedSupabaseBackup(force = false) {
-    if (!SUPABASE_BACKUP_ENABLED || !supabaseClient.useSupabase()) {
-        return false;
-    }
-
-    const now = Date.now();
-    const timeSinceLastBackup = now - lastSupabaseBackup;
-    
-    // Check if we should skip this backup
-    if (!force && timeSinceLastBackup < SUPABASE_BACKUP_INTERVAL) {
-        console.log(`⏭️ Skipping Supabase backup (${Math.round(timeSinceLastBackup/1000)}s since last, minimum ${SUPABASE_BACKUP_INTERVAL/1000}s)`);
-        return false;
-    }
-
-    // Calculate current data hash for deduplication
-    const currentDataHash = calculateDataHash(liveDataStore);
-    if (!force && currentDataHash === lastSupabaseDataHash) {
-        console.log('⏭️ Skipping Supabase backup (no data changes detected)');
-        lastSupabaseBackup = now; // Update timestamp to prevent continuous checks
-        return false;
-    }
-
-    try {
-        console.log('🔄 Starting optimized Supabase backup...');
-        const startTime = Date.now();
-        
-        // Batch backup to avoid overwhelming Supabase
-        let totalSessions = 0;
-        let successfulBackups = 0;
-        let batchCount = 0;
-        
-        const allSessions = [];
-        for (const username in liveDataStore) {
-            const sessions = liveDataStore[username];
-            if (Array.isArray(sessions)) {
-                allSessions.push(...sessions.map(session => ({ ...session, username })));
-            }
-        }
-        
-        // Process in batches
-        for (let i = 0; i < allSessions.length; i += SUPABASE_BACKUP_BATCH_SIZE) {
-            const batch = allSessions.slice(i, i + SUPABASE_BACKUP_BATCH_SIZE);
-            batchCount++;
-            
-            console.log(`📦 Processing batch ${batchCount} (${batch.length} sessions)...`);
-            
-            for (const session of batch) {
-                try {
-                    const saved = await supabaseClient.saveSessionToSupabase(session);
-                    if (saved) successfulBackups++;
-                    totalSessions++;
-                } catch (error) {
-                    console.error(`❌ Failed to save session ${session.session_id}:`, error.message);
-                }
-            }
-            
-            // Small delay between batches to avoid rate limiting
-            if (i + SUPABASE_BACKUP_BATCH_SIZE < allSessions.length) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-        }
-        
-        const duration = Date.now() - startTime;
-        console.log(`✅ Optimized Supabase backup completed: ${successfulBackups}/${totalSessions} sessions in ${duration}ms (${batchCount} batches)`);
-        
-        // Update tracking variables
-        lastSupabaseBackup = now;
-        lastSupabaseDataHash = currentDataHash;
-        pendingSupabaseBackup = false;
-        
-        return true;
-    } catch (error) {
-        console.error('❌ Optimized Supabase backup failed:', error);
-        pendingSupabaseBackup = false;
-        return false;
-    }
-}
-
-// Debounced Supabase backup
-function scheduleSupabaseBackup(force = false) {
+// --- SUPABASE BACKUP FUNCTIONS ---
+function scheduleSupabaseBackup(forced = false) {
     if (!SUPABASE_BACKUP_ENABLED || !supabaseClient.useSupabase()) {
         return;
     }
-
-    // Clear existing timer
+    
+    const now = Date.now();
+    
+    // Clear existing debounce timer
     if (supabaseBackupDebounceTimer) {
         clearTimeout(supabaseBackupDebounceTimer);
     }
-
-    // Force backup immediately if requested or if it's been too long
-    const timeSinceLastBackup = Date.now() - lastSupabaseBackup;
-    if (force || timeSinceLastBackup >= SUPABASE_BACKUP_FORCE_INTERVAL) {
-        console.log('🚀 Force Supabase backup triggered');
+    
+    // Force backup immediately if requested
+    if (forced) {
+        console.log('🚀 Forcing immediate Supabase backup');
         performOptimizedSupabaseBackup(true);
         return;
     }
-
-    // Schedule debounced backup
-    if (!pendingSupabaseBackup) {
-        pendingSupabaseBackup = true;
-        console.log(`⏰ Scheduling Supabase backup in ${SUPABASE_BACKUP_DEBOUNCE_DELAY/1000}s...`);
+    
+    // Check if enough time has passed since last backup
+    const timeSinceLastBackup = now - lastSupabaseBackup;
+    const shouldForceBackup = timeSinceLastBackup > SUPABASE_BACKUP_FORCE_INTERVAL;
+    
+    if (shouldForceBackup) {
+        console.log('⏰ Force backup interval reached, scheduling immediate backup');
+        performOptimizedSupabaseBackup(true);
+        return;
     }
-
+    
+    // Set debounce timer for regular backup
     supabaseBackupDebounceTimer = setTimeout(() => {
-        if (pendingSupabaseBackup) {
-            performOptimizedSupabaseBackup(false);
-        }
+        performOptimizedSupabaseBackup(false);
     }, SUPABASE_BACKUP_DEBOUNCE_DELAY);
-}
-
-// Emit status & account status to new socket.io client on connect
-io.on('connection', (socket) => {
-    emitStatusUpdate();
-    emitAccountStatusUpdate();
-});
-
-// --- START SERVER ---
-httpServer.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-});
-// --- END START SERVER ---
-
-// --- SCHEDULED SUPABASE BACKUP SYSTEM ---
-let scheduledBackupInterval = null;
-function startScheduledBackup() {
-    if (scheduledBackupInterval) {
-        clearInterval(scheduledBackupInterval);
-    }
-    if (SUPABASE_BACKUP_ENABLED && supabaseClient.useSupabase()) {
-        console.log(`🕐 Starting scheduled Supabase backup every ${SUPABASE_BACKUP_INTERVAL/1000/60} minutes`);
-        scheduledBackupInterval = setInterval(async () => {
-            console.log('🕐 Scheduled Supabase backup triggered');
-            await performOptimizedSupabaseBackup(false);
-        }, SUPABASE_BACKUP_INTERVAL);
-    }
-}
-function stopScheduledBackup() {
-    if (scheduledBackupInterval) {
-        clearInterval(scheduledBackupInterval);
-        scheduledBackupInterval = null;
-        console.log('🛑 Scheduled Supabase backup stopped');
-    }
-}
-
-// Jalankan scheduled backup setelah server inisialisasi
-initializeServer().then(() => {
-    startScheduledBackup();
-    // Graceful shutdown handling
-    process.on('SIGTERM', async () => {
-        console.log('🔄 SIGTERM received, performing final backup...');
-        stopScheduledBackup();
-        await performOptimizedSupabaseBackup(true);
-        process.exit(0);
-    });
-    process.on('SIGINT', async () => {
-        console.log('🔄 SIGINT received, performing final backup...');
-        stopScheduledBackup();
-        await performOptimizedSupabaseBackup(true);
-        process.exit(0);
-    });
-});
-
-// CSV handling function
-function saveLiveDataToCSV() {
-    // Header
-    const header = [
-        'tanggal dan jam', 'roomid', 'akun', 'durasi live', 'peakview', 'totalgift',
-        ...Array.from({length: 10}, (_, i) => `topspender${i+1}`)
-    ];
-    let rows = [header.join('|')];
     
-    for (const username in liveDataStore) {
-        const sessions = liveDataStore[username];
-        if (!Array.isArray(sessions)) continue;
-        
-        for (const data of sessions) {
-            if (!data.room_id) continue; // skip if no room id
-            
-            // Format tanggal dan jam dari timestamp_start jika ada, else '-'
-            const tgl = data.timestamp_start || '-';
-            const row = [
-                tgl,
-                data.room_id,
-                data.username || username,
-                data.duration || '-',
-                data.peak_viewer || 0,
-                data.total_diamond || 0
-            ];
-            
-            // Top spender
-            const sorted = Object.entries(data.leaderboard||{}).sort((a,b)=>b[1]-a[1]);
-            for (let i=0; i<10; i++) {
-                if (sorted[i]) {
-                    row.push(`${sorted[i][0]}(${sorted[i][1]})`);
-                } else {
-                    row.push('');
-                }
-            }
-            rows.push(row.join('|'));
-        }
+    console.log(`📅 Supabase backup scheduled in ${SUPABASE_BACKUP_DEBOUNCE_DELAY/1000}s`);
+}
+
+async function performOptimizedSupabaseBackup(forced = false) {
+    if (!SUPABASE_BACKUP_ENABLED || !supabaseClient.useSupabase()) {
+        return false;
     }
     
-    fs.writeFileSync(csvFilePath, rows.join('\n'));
-}
-
-// Endpoint for save and download CSV
-app.get('/api/save-and-download-csv', (req, res) => {
-    saveLiveDataToCSV();
-    res.download(csvFilePath, 'live_data.csv');
-});
-
-// --- ENDPOINT UNTUK TESTING SAJA ---
-// Hapus semua session dan akun, set semua akun ke offline
-app.post('/api/reset-all', (req, res) => {
-    // 1. Matikan autorecover di awal
-    autorecover = false;
-    if (fs.existsSync(autorecoverFile)) fs.unlinkSync(autorecoverFile);
-
-    // 2. Disconnect all connections
-    for (const uname in activeConnections) {
-        try {
-            activeConnections[uname].disconnect && activeConnections[uname].disconnect();
-        } catch (e) {}
+    if (pendingSupabaseBackup && !forced) {
+        console.log('⏳ Backup already in progress, skipping');
+        return false;
     }
-    activeConnections = {};
-    if (monitorLiveInterval) clearInterval(monitorLiveInterval);
-    if (monitorConnectedInterval) clearInterval(monitorConnectedInterval);
-
-    // 3. Hapus semua data live
-    liveDataStore = {};
-    fs.writeFileSync(liveDataFile, JSON.stringify(liveDataStore, null, 2));
-    fs.writeFileSync(csvFilePath, ''); // Hapus file CSV
-
-    // 4. Set semua akun ke offline
-    let usernames = [];
+    
     try {
-        usernames = fs.readFileSync(accountFilePath, 'utf-8').split('\n').filter(Boolean);
-    } catch (e) {}
-    offlineAccounts = [...new Set(usernames)];
-    liveAccounts = [];
-    connectedAccounts = [];
-    errorAccounts = [];
-    isMonitoring = false;
-
-    // 5. Tangguhkan semua akun di Supabase (jika perlu)
-    (async () => {
-        if (supabaseClient.useSupabase()) {
-            for (const username of usernames) {
-                try {
-                    await supabaseClient.setAccountStatus(username, 'suspended');
-                    console.log(`⏸️ Account ${username} suspended in Supabase`);
-                } catch (e) {
-                    console.error(`❌ Failed to suspend account ${username} in Supabase:`, e.message);
-                }
+        pendingSupabaseBackup = true;
+        const now = Date.now();
+        
+        // Generate data hash for deduplication
+        const dataString = JSON.stringify(liveDataStore);
+        const currentDataHash = require('crypto').createHash('md5').update(dataString).digest('hex');
+        
+        // Skip backup if data hasn't changed (unless forced)
+        if (!forced && currentDataHash === lastSupabaseDataHash) {
+            console.log('🔄 No data changes detected, skipping backup');
+            pendingSupabaseBackup = false;
+            return false;
+        }
+        
+        // Prepare sessions for backup (batching)
+        const allSessions = [];
+        for (const username in liveDataStore) {
+            const userSessions = liveDataStore[username];
+            if (Array.isArray(userSessions)) {
+                userSessions.forEach(session => {
+                    allSessions.push({
+                        username,
+                        session_data: session,
+                        last_updated: now
+                    });
+                });
             }
         }
-    })();
+        
+        // Backup in batches
+        const totalSessions = allSessions.length;
+        let backedUpSessions = 0;
+        
+        for (let i = 0; i < allSessions.length; i += SUPABASE_BACKUP_BATCH_SIZE) {
+            const batch = allSessions.slice(i, i + SUPABASE_BACKUP_BATCH_SIZE);
+            
+            try {
+                const success = await supabaseClient.saveDataToSupabase(
+                    Object.fromEntries(batch.map(item => [item.username, item.session_data]))
+                );
+                
+                if (success) {
+                    backedUpSessions += batch.length;
+                } else {
+                    console.error(`❌ Failed to backup batch ${Math.floor(i/SUPABASE_BACKUP_BATCH_SIZE) + 1}`);
+                }
+            } catch (error) {
+                console.error(`❌ Error backing up batch ${Math.floor(i/SUPABASE_BACKUP_BATCH_SIZE) + 1}:`, error.message);
+            }
+            
+            // Small delay between batches to avoid overwhelming Supabase
+            if (i + SUPABASE_BACKUP_BATCH_SIZE < allSessions.length) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+        
+        // Update backup tracking
+        lastSupabaseBackup = now;
+        lastSupabaseDataHash = currentDataHash;
+        
+        console.log(`✅ Supabase backup completed: ${backedUpSessions}/${totalSessions} sessions`);
+        console.log(`📊 Backup stats: ${forced ? 'FORCED' : 'SCHEDULED'} | Hash: ${currentDataHash.substring(0, 8)}...`);
+        
+        return true;
+        
+    } catch (error) {
+        console.error('❌ Supabase backup failed:', error.message);
+        return false;
+    } finally {
+        pendingSupabaseBackup = false;
+    }
+}
 
-    emitStatusUpdate();
-    emitAccountStatusUpdate();
-    res.json({ message: 'All sessions cleared, all accounts set to offline.' });
+// Start the server
+httpServer.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📱 Frontend: http://localhost:${PORT}`);
+    console.log(`💻 Environment: ${process.env.NODE_ENV || 'development'}`);
+    
+    // Start periodic Supabase backup if enabled
+    if (SUPABASE_BACKUP_ENABLED && supabaseClient.useSupabase()) {
+        setInterval(() => {
+            scheduleSupabaseBackup(false);
+        }, SUPABASE_BACKUP_INTERVAL);
+        console.log(`📦 Periodic Supabase backup enabled (${SUPABASE_BACKUP_INTERVAL/1000/60}min intervals)`);
+    }
+});
+
+// Handle graceful shutdown
+process.on('SIGINT', () => {
+    console.log('\n🛑 Received SIGINT, shutting down gracefully...');
+    
+    // Save final backup
+    if (SUPABASE_BACKUP_ENABLED && supabaseClient.useSupabase()) {
+        console.log('💾 Performing final backup...');
+        performOptimizedSupabaseBackup(true).then(() => {
+            process.exit(0);
+        });
+    } else {
+        process.exit(0);
+    }
+});
+
+process.on('SIGTERM', () => {
+    console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
+    
+    // Save final backup
+    if (SUPABASE_BACKUP_ENABLED && supabaseClient.useSupabase()) {
+        console.log('💾 Performing final backup...');
+        performOptimizedSupabaseBackup(true).then(() => {
+            process.exit(0);
+        });
+    } else {
+        process.exit(0);
+    }
 });
