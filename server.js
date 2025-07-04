@@ -69,6 +69,12 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// Initialize HTTP server and Socket.IO
+const httpServer = http.createServer(app);
+const io = new Server(httpServer, {
+    cors: { origin: '*', methods: ['GET', 'POST'] }
+});
+
 // Clear log file on startup
 fs.writeFileSync(logFilePath, '');
 
@@ -101,6 +107,13 @@ let lastSupabaseBackup = 0;
 let pendingSupabaseBackup = false;
 let supabaseBackupDebounceTimer = null;
 let lastSupabaseDataHash = null;
+
+// --- SOCKET.IO SETUP ---
+// const httpServer = http.createServer(app);
+// const io = new Server(httpServer, {
+//     cors: { origin: '*', methods: ['GET', 'POST'] }
+// });
+// --- END SOCKET.IO SETUP ---
 
 // Initialize Supabase and load data on server start
 async function initializeServer() {
@@ -1422,6 +1435,12 @@ io.on('connection', (socket) => {
     emitAccountStatusUpdate();
 });
 
+// --- START SERVER ---
+httpServer.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+});
+// --- END START SERVER ---
+
 // --- SCHEDULED SUPABASE BACKUP SYSTEM ---
 let scheduledBackupInterval = null;
 function startScheduledBackup() {
@@ -1460,4 +1479,105 @@ initializeServer().then(() => {
         await performOptimizedSupabaseBackup(true);
         process.exit(0);
     });
+});
+
+// CSV handling function
+function saveLiveDataToCSV() {
+    // Header
+    const header = [
+        'tanggal dan jam', 'roomid', 'akun', 'durasi live', 'peakview', 'totalgift',
+        ...Array.from({length: 10}, (_, i) => `topspender${i+1}`)
+    ];
+    let rows = [header.join('|')];
+    
+    for (const username in liveDataStore) {
+        const sessions = liveDataStore[username];
+        if (!Array.isArray(sessions)) continue;
+        
+        for (const data of sessions) {
+            if (!data.room_id) continue; // skip if no room id
+            
+            // Format tanggal dan jam dari timestamp_start jika ada, else '-'
+            const tgl = data.timestamp_start || '-';
+            const row = [
+                tgl,
+                data.room_id,
+                data.username || username,
+                data.duration || '-',
+                data.peak_viewer || 0,
+                data.total_diamond || 0
+            ];
+            
+            // Top spender
+            const sorted = Object.entries(data.leaderboard||{}).sort((a,b)=>b[1]-a[1]);
+            for (let i=0; i<10; i++) {
+                if (sorted[i]) {
+                    row.push(`${sorted[i][0]}(${sorted[i][1]})`);
+                } else {
+                    row.push('');
+                }
+            }
+            rows.push(row.join('|'));
+        }
+    }
+    
+    fs.writeFileSync(csvFilePath, rows.join('\n'));
+}
+
+// Endpoint for save and download CSV
+app.get('/api/save-and-download-csv', (req, res) => {
+    saveLiveDataToCSV();
+    res.download(csvFilePath, 'live_data.csv');
+});
+
+// --- ENDPOINT UNTUK TESTING SAJA ---
+// Hapus semua session dan akun, set semua akun ke offline
+app.post('/api/reset-all', (req, res) => {
+    // 1. Matikan autorecover di awal
+    autorecover = false;
+    if (fs.existsSync(autorecoverFile)) fs.unlinkSync(autorecoverFile);
+
+    // 2. Disconnect all connections
+    for (const uname in activeConnections) {
+        try {
+            activeConnections[uname].disconnect && activeConnections[uname].disconnect();
+        } catch (e) {}
+    }
+    activeConnections = {};
+    if (monitorLiveInterval) clearInterval(monitorLiveInterval);
+    if (monitorConnectedInterval) clearInterval(monitorConnectedInterval);
+
+    // 3. Hapus semua data live
+    liveDataStore = {};
+    fs.writeFileSync(liveDataFile, JSON.stringify(liveDataStore, null, 2));
+    fs.writeFileSync(csvFilePath, ''); // Hapus file CSV
+
+    // 4. Set semua akun ke offline
+    let usernames = [];
+    try {
+        usernames = fs.readFileSync(accountFilePath, 'utf-8').split('\n').filter(Boolean);
+    } catch (e) {}
+    offlineAccounts = [...new Set(usernames)];
+    liveAccounts = [];
+    connectedAccounts = [];
+    errorAccounts = [];
+    isMonitoring = false;
+
+    // 5. Tangguhkan semua akun di Supabase (jika perlu)
+    (async () => {
+        if (supabaseClient.useSupabase()) {
+            for (const username of usernames) {
+                try {
+                    await supabaseClient.setAccountStatus(username, 'suspended');
+                    console.log(`⏸️ Account ${username} suspended in Supabase`);
+                } catch (e) {
+                    console.error(`❌ Failed to suspend account ${username} in Supabase:`, e.message);
+                }
+            }
+        }
+    })();
+
+    emitStatusUpdate();
+    emitAccountStatusUpdate();
+    res.json({ message: 'All sessions cleared, all accounts set to offline.' });
 });
