@@ -1,0 +1,25 @@
+{
+  "name": "tiktok-account-discovery-pilot-archived",
+  "version": "0.1.0",
+  "description": "ARCHIVED: Failed pilot project for TikTok account discovery - discontinued due to technical limitations",
+  "main": "DISCONTINUED",
+  "scripts": {
+    "discontinued": "echo 'This project has been discontinued. See PROJECT_DISCONTINUATION_REPORT.md for details.'"
+  },
+  "keywords": [
+    "tiktok",
+    "scraping", 
+    "account-discovery",
+    "archived",
+    "discontinued"
+  ],
+  "status": "DISCONTINUED",
+  "archived": "2025-07-03",
+  "reason": "Technical limitations and insufficient ROI",
+  "alternatives": [
+    "Manual curation",
+    "Instagram API",
+    "YouTube API",
+    "Community-driven discovery"
+  ]
+}

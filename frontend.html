@@ -135,38 +135,321 @@
                 min-width: 220px;
             }
         }
+        
+        /* Tab Navigation Styles */
+        .tab-navigation {
+            margin: 20px 0;
+            border-bottom: 2px solid #e3e7ef;
+        }
+        .tab-button {
+            background: none;
+            border: none;
+            padding: 12px 24px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            color: #6b7280;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s ease;
+        }
+        .tab-button:hover {
+            background: #f8fafc;
+            color: #374151;
+        }
+        .tab-button.active {
+            color: #059669;
+            border-bottom-color: #059669;
+            background: #f0fdfa;
+        }
+        .tab-content {
+            display: none;
+            padding: 20px 0;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Account Discovery Styles */
+        .discovery-section {
+            background: #f8fafc;
+            padding: 20px;
+            border-radius: 12px;
+            margin: 16px 0;
+        }
+        .discovery-controls {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .discovery-input {
+            flex: 1;
+            min-width: 200px;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .discovery-button {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        .discovery-button:hover {
+            background: linear-gradient(135deg, #047857 0%, #065f46 100%);
+            transform: translateY(-1px);
+        }
+        .discovery-button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .discovery-results {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 16px;
+            margin-top: 20px;
+        }
+        .discovery-card {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 16px;
+            transition: all 0.3s ease;
+        }
+        .discovery-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            transform: translateY(-2px);
+        }
+        .discovery-card .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .discovery-card .username {
+            font-weight: 600;
+            font-size: 16px;
+            color: #1f2937;
+        }
+        .discovery-card .score {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .discovery-card .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin: 12px 0;
+        }
+        .discovery-card .stat {
+            text-align: center;
+            padding: 8px;
+            background: #f9fafb;
+            border-radius: 6px;
+        }
+        .discovery-card .stat-value {
+            font-weight: 600;
+            color: #1f2937;
+            font-size: 14px;
+        }
+        .discovery-card .stat-label {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 2px;
+        }
+        .discovery-card .bio {
+            font-size: 13px;
+            color: #4b5563;
+            margin: 12px 0;
+            line-height: 1.4;
+        }
+        .discovery-card .actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .discovery-card .action-btn {
+            flex: 1;
+            padding: 6px 12px;
+            border: 1px solid #d1d5db;
+            background: white;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .discovery-card .action-btn:hover {
+            background: #f3f4f6;
+        }
+        .discovery-card .action-btn.primary {
+            background: #059669;
+            color: white;
+            border-color: #059669;
+        }
+        .discovery-card .action-btn.primary:hover {
+            background: #047857;
+        }
     </style>
 </head>
 <body>
-    <h1>TikTok Live Scraper</h1>
+    <h1>TikTok Live Scraper v2.0</h1>
 
     <div id="statusBar" style="margin-bottom:12px;display:flex;gap:16px;align-items:center;font-weight:bold;font-size:15px;"></div>
 
-    <button id="checkStatus">Check Account Status</button>
-    <button id="startScraping" disabled>Start Scraping</button>
-    <button id="stopAndReset">Stop & Reset</button>
-    <button id="editUserList">Edit Username List</button>
-    <button id="downloadData">Save and Download</button>
-
-    <div id="errorUsers">
-        <h2 style="color:#b00">Error Users</h2>
-        <ul id="errorList"></ul>
+    <!-- Tab Navigation -->
+    <div class="tab-navigation">
+        <button class="tab-button active" onclick="switchTab('monitoring')">Live Monitoring</button>
+        <button class="tab-button" onclick="switchTab('discovery')">Account Discovery</button>
+        <button class="tab-button" onclick="switchTab('analytics')">Analytics</button>
     </div>
 
-    <div id="onlineUsers">
-        <h2>Online Users</h2>
-        <div id="onlineCards"></div>
+    <!-- Monitoring Tab Content -->
+    <div id="tab-monitoring" class="tab-content active">
+        <button id="checkStatus">Check Account Status</button>
+        <button id="startScraping" disabled>Start Scraping</button>
+        <button id="stopAndReset">Stop & Reset</button>
+        <button id="editUserList">Edit Username List</button>
+        <button id="downloadData">Save and Download</button>
+
+        <div id="errorUsers">
+            <h2 style="color:#b00">Error Users</h2>
+            <ul id="errorList"></ul>
+        </div>
+
+        <div id="onlineUsers">
+            <h2>Online Users</h2>
+            <div id="onlineCards"></div>
+        </div>
+
+        <div id="offlineUsers">
+            <h2>Offline Users</h2>
+            <ul id="offlineList"></ul>
+        </div>
+
+        <div id="editUserListContainer">
+            <h2>Edit Username List</h2>
+            <textarea id="usernameTextarea" rows="10" cols="50"></textarea><br>
+            <button id="saveUserList">Save Changes</button>
+        </div>
     </div>
 
-    <div id="offlineUsers">
-        <h2>Offline Users</h2>
-        <ul id="offlineList"></ul>
+    <!-- Account Discovery Tab Content -->
+    <div id="tab-discovery" class="tab-content">
+        <div class="discovery-section">
+            <h2>🔍 Account Discovery & Curation</h2>
+            <p>Discover and curate TikTok accounts for live streaming monitoring based on smart criteria.</p>
+            
+            <div class="discovery-controls">
+                <input type="text" id="discoveryKeywords" class="discovery-input" 
+                       placeholder="Enter keywords (e.g., dance, music, gaming)" />
+                <select id="discoveryCategory" class="discovery-input">
+                    <option value="">All Categories</option>
+                    <option value="dance">Dance</option>
+                    <option value="music">Music</option>
+                    <option value="gaming">Gaming</option>
+                    <option value="performance">Performance</option>
+                    <option value="lifestyle">Lifestyle</option>
+                    <option value="beauty">Beauty</option>
+                </select>
+                <input type="number" id="discoveryLimit" class="discovery-input" 
+                       placeholder="Limit (default: 20)" min="1" max="100" value="20" />
+                <button id="startDiscovery" class="discovery-button">🚀 Start Discovery</button>
+            </div>
+            
+            <div class="discovery-controls">
+                <label>
+                    <input type="checkbox" id="requireSchedule" /> 
+                    Require Live Schedule in Bio
+                </label>
+                <label>
+                    <input type="checkbox" id="requireLiveKeywords" /> 
+                    Require Live Keywords
+                </label>
+                <label>
+                    Min Followers: 
+                    <input type="number" id="minFollowers" class="discovery-input" 
+                           value="5000" min="0" style="width: 100px;" />
+                </label>
+                <label>
+                    Max Followers: 
+                    <input type="number" id="maxFollowers" class="discovery-input" 
+                           value="500000" min="0" style="width: 100px;" />
+                </label>
+            </div>
+            
+            <div id="discoveryStatus" style="margin: 16px 0; font-weight: 600;"></div>
+            <div id="discoveryResults" class="discovery-results"></div>
+        </div>
+        
+        <div class="discovery-section">
+            <h3>🎯 Batch Discovery</h3>
+            <p>Run automated discovery for multiple categories and keywords.</p>
+            
+            <div class="discovery-controls">
+                <button id="batchDiscoveryDance" class="discovery-button">
+                    💃 Discover Dance Accounts
+                </button>
+                <button id="batchDiscoveryMusic" class="discovery-button">
+                    🎵 Discover Music Accounts  
+                </button>
+                <button id="batchDiscoveryGaming" class="discovery-button">
+                    🎮 Discover Gaming Accounts
+                </button>
+                <button id="testConnectivity" class="discovery-button">
+                    🧪 Test Account Connectivity
+                </button>
+            </div>
+        </div>
+        
+        <div class="discovery-section">
+            <h3>📤 Export & Import</h3>
+            <div class="discovery-controls">
+                <button id="exportAccounts" class="discovery-button">
+                    💾 Export Discovered Accounts
+                </button>
+                <button id="importToMonitoring" class="discovery-button">
+                    ➕ Add Selected to Monitoring
+                </button>
+                <input type="file" id="importFile" accept=".json" style="display: none;" />
+                <button id="importAccounts" class="discovery-button">
+                    📂 Import Account List
+                </button>
+            </div>
+        </div>
     </div>
 
-    <div id="editUserListContainer">
-        <h2>Edit Username List</h2>
-        <textarea id="usernameTextarea" rows="10" cols="50"></textarea><br>
-        <button id="saveUserList">Save Changes</button>
+    <!-- Analytics Tab Content -->
+    <div id="tab-analytics" class="tab-content">
+        <div class="discovery-section">
+            <h2>📊 Analytics Dashboard</h2>
+            <p>View statistics and insights from account discovery and live monitoring.</p>
+            
+            <div id="analyticsContent">
+                <div style="text-align: center; padding: 40px; color: #6b7280;">
+                    📈 Analytics dashboard coming soon...
+                    <br><br>
+                    Will include:
+                    <ul style="text-align: left; max-width: 400px; margin: 20px auto;">
+                        <li>Discovery success rates by category</li>
+                        <li>Account performance metrics</li>
+                        <li>Live streaming schedules analysis</li>
+                        <li>Optimal discovery times</li>
+                        <li>Account scoring distribution</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div id="loadingOverlay">
@@ -578,6 +861,283 @@
                     delete window._liveData[username];
                 }
             });
+        }
+
+        // --- TAB SWITCHING FUNCTIONALITY ---
+        function switchTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Remove active class from all buttons
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+            
+            // Add active class to clicked button
+            event.target.classList.add('active');
+            
+            console.log('Switched to tab:', tabName);
+        }
+
+        // --- ACCOUNT DISCOVERY FUNCTIONALITY ---
+        let discoveredAccountsData = [];
+        let selectedAccounts = new Set();
+
+        // Start Discovery
+        document.getElementById('startDiscovery').addEventListener('click', async () => {
+            const keywords = document.getElementById('discoveryKeywords').value.trim();
+            const category = document.getElementById('discoveryCategory').value;
+            const limit = parseInt(document.getElementById('discoveryLimit').value) || 20;
+            const requireSchedule = document.getElementById('requireSchedule').checked;
+            const requireLiveKeywords = document.getElementById('requireLiveKeywords').checked;
+            const minFollowers = parseInt(document.getElementById('minFollowers').value) || 5000;
+            const maxFollowers = parseInt(document.getElementById('maxFollowers').value) || 500000;
+
+            if (!keywords) {
+                alert('Please enter search keywords');
+                return;
+            }
+
+            const button = document.getElementById('startDiscovery');
+            const statusDiv = document.getElementById('discoveryStatus');
+            
+            button.disabled = true;
+            button.textContent = '🔍 Searching...';
+            statusDiv.textContent = 'Starting account discovery...';
+
+            try {
+                const keywordArray = keywords.split(',').map(k => k.trim()).filter(k => k);
+                
+                // Search accounts
+                statusDiv.textContent = `Searching for accounts with keywords: ${keywordArray.join(', ')}`;
+                
+                const searchResponse = await fetch('/api/discovery/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        keywords: keywordArray,
+                        filters: {
+                            category,
+                            limit,
+                            minFollowers,
+                            maxFollowers,
+                            requireSchedule,
+                            requireLiveKeywords
+                        }
+                    })
+                });
+
+                const searchData = await searchResponse.json();
+                
+                if (!searchData.success) {
+                    throw new Error(searchData.error);
+                }
+
+                // Curate accounts
+                statusDiv.textContent = 'Curating and scoring accounts...';
+                
+                const curateResponse = await fetch('/api/discovery/curate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        accounts: searchData.data.accounts,
+                        criteria: {
+                            requireSchedule,
+                            requireLiveKeywords,
+                            minFollowers,
+                            maxFollowers
+                        }
+                    })
+                });
+
+                const curateData = await curateResponse.json();
+                
+                if (!curateData.success) {
+                    throw new Error(curateData.error);
+                }
+
+                discoveredAccountsData = curateData.data.curatedAccounts;
+                renderDiscoveryResults(discoveredAccountsData);
+                
+                statusDiv.innerHTML = `
+                    ✅ Discovery completed! Found <strong>${discoveredAccountsData.length}</strong> accounts.
+                    Original: ${searchData.data.totalFound} → Curated: ${discoveredAccountsData.length}
+                `;
+
+            } catch (error) {
+                console.error('Discovery error:', error);
+                statusDiv.innerHTML = `❌ Discovery failed: ${error.message}`;
+            }
+
+            button.disabled = false;
+            button.textContent = '🚀 Start Discovery';
+        });
+
+        // Render discovery results
+        function renderDiscoveryResults(accounts) {
+            const resultsDiv = document.getElementById('discoveryResults');
+            resultsDiv.innerHTML = '';
+
+            accounts.forEach(account => {
+                const card = document.createElement('div');
+                card.className = 'discovery-card';
+                
+                const scheduleInfo = account.bioAnalysis?.extractedSchedule ? 
+                    `📅 ${account.bioAnalysis.extractedSchedule.timeText}` : '';
+                
+                const followers = formatNumber(account.stats.followerCount);
+                const videos = formatNumber(account.stats.videoCount);
+                
+                card.innerHTML = `
+                    <div class="header">
+                        <div class="username">@${account.uniqueId}</div>
+                        <div class="score">${Math.round(account.curationScore)}%</div>
+                    </div>
+                    <div class="bio">${account.signature || 'No bio available'}</div>
+                    <div class="stats">
+                        <div class="stat">
+                            <div class="stat-value">${followers}</div>
+                            <div class="stat-label">Followers</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${videos}</div>
+                            <div class="stat-label">Videos</div>
+                        </div>
+                    </div>
+                    ${scheduleInfo ? `<div style="font-size: 12px; color: #059669; margin: 8px 0;">${scheduleInfo}</div>` : ''}
+                    <div class="actions">
+                        <button class="action-btn" onclick="previewAccount('${account.uniqueId}')">
+                            👁️ Preview
+                        </button>
+                        <button class="action-btn primary" onclick="toggleAccountSelection('${account.uniqueId}')">
+                            ➕ Select
+                        </button>
+                    </div>
+                `;
+                
+                resultsDiv.appendChild(card);
+            });
+        }
+
+        // Toggle account selection
+        function toggleAccountSelection(username) {
+            const button = event.target;
+            
+            if (selectedAccounts.has(username)) {
+                selectedAccounts.delete(username);
+                button.textContent = '➕ Select';
+                button.classList.remove('selected');
+            } else {
+                selectedAccounts.add(username);
+                button.textContent = '✅ Selected';
+                button.classList.add('selected');
+            }
+            
+            console.log('Selected accounts:', Array.from(selectedAccounts));
+        }
+
+        // Preview account (placeholder)
+        function previewAccount(username) {
+            alert(`Preview for @${username} - Coming soon!\n\nThis will show:\n- Recent videos\n- Live streaming history\n- Detailed bio analysis\n- Engagement metrics`);
+        }
+
+        // Batch discovery buttons
+        document.getElementById('batchDiscoveryDance').addEventListener('click', () => {
+            document.getElementById('discoveryKeywords').value = 'dance, dancing, dancer, choreography';
+            document.getElementById('discoveryCategory').value = 'dance';
+            document.getElementById('startDiscovery').click();
+        });
+
+        document.getElementById('batchDiscoveryMusic').addEventListener('click', () => {
+            document.getElementById('discoveryKeywords').value = 'music, singing, singer, song';
+            document.getElementById('discoveryCategory').value = 'music';
+            document.getElementById('startDiscovery').click();
+        });
+
+        document.getElementById('batchDiscoveryGaming').addEventListener('click', () => {
+            document.getElementById('discoveryKeywords').value = 'gaming, gamer, game, streamer';
+            document.getElementById('discoveryCategory').value = 'gaming';
+            document.getElementById('startDiscovery').click();
+        });
+
+        // Import selected accounts to monitoring
+        document.getElementById('importToMonitoring').addEventListener('click', async () => {
+            if (selectedAccounts.size === 0) {
+                alert('Please select accounts first');
+                return;
+            }
+
+            const usernames = Array.from(selectedAccounts);
+            
+            try {
+                // Get current account list
+                const response = await fetch('/api/get-list');
+                const data = await response.json();
+                const currentUsernames = data.usernames || [];
+                
+                // Add new usernames (avoid duplicates)
+                const newUsernames = [...new Set([...currentUsernames, ...usernames])];
+                
+                // Update the list
+                const updateResponse = await fetch('/api/edit-list', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ usernames: newUsernames })
+                });
+
+                if (updateResponse.ok) {
+                    alert(`Successfully added ${usernames.length} accounts to monitoring list!`);
+                    selectedAccounts.clear();
+                    
+                    // Update UI
+                    document.querySelectorAll('.action-btn.primary').forEach(btn => {
+                        if (btn.textContent === '✅ Selected') {
+                            btn.textContent = '➕ Select';
+                            btn.classList.remove('selected');
+                        }
+                    });
+                } else {
+                    throw new Error('Failed to update account list');
+                }
+                
+            } catch (error) {
+                console.error('Import error:', error);
+                alert(`Failed to import accounts: ${error.message}`);
+            }
+        });
+
+        // Export accounts
+        document.getElementById('exportAccounts').addEventListener('click', () => {
+            if (discoveredAccountsData.length === 0) {
+                alert('No accounts to export. Run discovery first.');
+                return;
+            }
+
+            const dataStr = JSON.stringify(discoveredAccountsData, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `discovered_accounts_${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            
+            URL.revokeObjectURL(url);
+        });
+
+        // Utility function to format numbers
+        function formatNumber(num) {
+            if (num >= 1000000) {
+                return (num / 1000000).toFixed(1) + 'M';
+            } else if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'K';
+            }
+            return num.toString();
         }
     </script>
 </body>

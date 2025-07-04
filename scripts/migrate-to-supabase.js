@@ -24,7 +24,7 @@ function loadExistingData() {
 async function migrateToSupabase() {
     console.log('🔄 Starting migration to Supabase...');
     
-    const supabaseClient = require('./supabase-client');
+    const supabaseClient = require('../supabase-client');
     
     // Initialize Supabase
     const initialized = supabaseClient.initializeSupabase();
@@ -58,7 +58,7 @@ async function migrateToSupabase() {
 async function testSupabaseConnection() {
     console.log('🔍 Testing Supabase connection...');
     
-    const supabaseClient = require('./supabase-client');
+    const supabaseClient = require('../supabase-client');
     const initialized = supabaseClient.initializeSupabase();
     
     if (!initialized) {

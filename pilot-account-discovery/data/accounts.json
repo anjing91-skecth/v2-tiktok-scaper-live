@@ -1,0 +1,32 @@
+[
+  {
+    "id": "account1",
+    "username": "your_username_1",
+    "email": "your_email_1@example.com",
+    "password": "your_password_1",
+    "status": "active",
+    "lastUsed": null,
+    "sessionFile": "account1_session.json",
+    "notes": "Main test account - replace with real credentials"
+  },
+  {
+    "id": "account2", 
+    "username": "your_username_2",
+    "email": "your_email_2@example.com",
+    "password": "your_password_2",
+    "status": "active",
+    "lastUsed": null,
+    "sessionFile": "account2_session.json",
+    "notes": "Backup test account - replace with real credentials"
+  },
+  {
+    "id": "account3",
+    "username": "your_username_3", 
+    "email": "your_email_3@example.com",
+    "password": "your_password_3",
+    "status": "active",
+    "lastUsed": null,
+    "sessionFile": "account3_session.json",
+    "notes": "Third test account - replace with real credentials"
+  }
+]

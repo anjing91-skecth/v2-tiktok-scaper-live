@@ -110,7 +110,7 @@ async function initializeServer() {
         
         // Load data from Supabase first
         if (supabaseClient.useSupabase()) {
-            console.log('🔄 Loading data from Supabase...');
+            console.log('Loading data from Supabase...');
             const supabaseData = await supabaseClient.loadDataFromSupabase();
             if (Object.keys(supabaseData).length > 0) {
                 Object.assign(liveDataStore, supabaseData);
@@ -128,119 +128,85 @@ async function initializeServer() {
         
         // Load from local file as fallback
         if (fs.existsSync(liveDataFile)) {
+            console.log(`   • Enabled: ${SUPABASE_BACKUP_ENABLED}`);
+            console.log(`   • Interval: ${SUPABASE_BACKUP_INTERVAL/1000/60} minutes`);
+            console.log(`   • Debounce: ${SUPABASE_BACKUP_DEBOUNCE_DELAY/1000} seconds`);
+            console.log(`   • Batch Size: ${SUPABASE_BACKUP_BATCH_SIZE} sessions`);
+            console.log(`   • Force Interval: ${SUPABASE_BACKUP_FORCE_INTERVAL/1000/60} minutes`);
+        }   } catch (e) {
+                console.error('Failed to load local data:', e.message);
+        // Load from local file as fallback
+        if (fs.existsSync(liveDataFile)) {
             try {
                 const localData = JSON.parse(fs.readFileSync(liveDataFile, 'utf-8'));
-                // Merge local data dengan Supabase data
+                // Merge local data dengan Supabase datah, 'utf-8').split('\n').filter(Boolean);
                 Object.assign(liveDataStore, localData);
-                console.log('📄 Local data loaded as backup');
-            } catch (e) {
-                console.error('❌ Failed to load local data:', e.message);
-            }
+                console.log('Local data loaded as backup');
+            } catch (e) { = [];
+                console.error('Failed to load local data:', e.message);
+            }le.log('All accounts initialized as offline on server start.');
         }
-        
-        // Initialize accounts as offline
+        // Load autorecover status from file
+        // Initialize accounts as offline)) {
         const usernames = fs.readFileSync(accountFilePath, 'utf-8').split('\n').filter(Boolean);
-        offlineAccounts = [...new Set(usernames)];
+        offlineAccounts = [...new Set(usernames)];ed - Auto-recovery enabled');
         liveAccounts = [];
-        connectedAccounts = [];
-        errorAccounts = [];
-        console.log(`📋 All ${usernames.length} accounts initialized as offline on server start.`);
+        connectedAccounts = [];;
+        errorAccounts = []; No autorecover flag - Auto-recovery disabled');
+        console.log('All accounts initialized as offline on server start.');
         
         // Load autorecover status from file
-        if (fs.existsSync(autorecoverFile)) {
-            autorecover = true;
-            console.log('🔄 Autorecover flag detected - Auto-recovery enabled');
-        } else {
-            autorecover = false;
-            console.log('ℹ️  No autorecover flag - Auto-recovery disabled');
-        }
-        
-        // Display comprehensive system status
-        console.log('\n🚀 System Status Summary:');
-        console.log(`   • Environment: ${process.env.NODE_ENV || 'development'}`);
-        console.log(`   • Port: ${PORT}`);
-        console.log(`   • Rate Limiting: ${RATE_LIMIT_ENABLED ? 'Enabled' : 'Disabled'} (${RATE_LIMIT_REQUESTS_PER_MINUTE} req/min)`);
-        console.log(`   • Session Detection: ${SESSION_DETECTION_ENABLED ? 'Enabled' : 'Disabled'}`);
-        console.log(`   • Auto-Recovery: ${autorecover ? 'Enabled' : 'Disabled'}`);
-        console.log(`   • Supabase Backup: ${SUPABASE_BACKUP_ENABLED ? 'Enabled' : 'Disabled'}`);
-        console.log(`   • Auto-Checker: ${AUTO_CHECKER_ENABLED ? 'Enabled' : 'Disabled'} (${AUTO_CHECKER_INTERVAL/1000/60} min)`);
-        console.log(`   • Total Accounts: ${usernames.length}`);
-        console.log(`   • Existing Sessions: ${Object.keys(liveDataStore).length}`);
-        console.log('');
-        
-        // Log recovery status after system check
-        if (autorecover) {
-            console.log('🔄 Recovery Process Status:');
-            console.log('   • System will automatically restart monitoring after updates');
-            console.log('   • All sessions will be restored from Supabase/local storage');
-            console.log('   • Account checking will resume with rate limiting');
-            console.log('');
-        }
-        
-        // Migrate data format if needed
-        migrateLiveDataStoreFormat();
-        
-        // Load autorecover status from file
-        if (fs.existsSync(autorecoverFile)) {
+        if (fs.existsSync(autorecoverFile)) {erver:', e.message);
             autorecover = true;
             console.log('✅ Autorecover flag detected - Auto-recovery enabled');
         } else {
             autorecover = false;
             console.log('ℹ️ No autorecover flag - Auto-recovery disabled');
         }
-        
-    } catch (e) {
+        ONNECTION MANAGEMENT REFACTOR ---
+    } catch (e) {onnection per account, reused between check-live and scraping
         console.error('Failed to initialize server:', e.message);
-    }
+    }bust reconnect logic: try 2 times, then move to offline and cleanup
 }
-
-// Run initialization
-initializeServer();
-
-// --- CONNECTION MANAGEMENT REFACTOR ---
+// Map to track if listeners are attached
+// Run initializationed = {};
+initializeServer();ns = {};
+let reconnectAttempts = {};
+// --- CONNECTION MANAGEMENT REFACTOR ---not disconnect, and stores connection in activeConnections
 // Use a single connection per account, reused between check-live and scraping
 // Attach listeners only on start-scraping, not during check-live
 // Robust reconnect logic: try 2 times, then move to offline and cleanup
-
+    let live = [];
 // Map to track if listeners are attached
 const listenersAttached = {};
 let activeConnections = {};
-let reconnectAttempts = {};
+let reconnectAttempts = {};E] Checking ${accountsToCheck.length} accounts with rate limiting...`);
 // Patch: check-live only connects, does not disconnect, and stores connection in activeConnections
 app.post('/api/check-live', async (req, res) => {
-    const accountsToCheck = [...offlineAccounts];
-    offlineAccounts = [];
-    let live = [];
-    let offline = [];
+    const accountsToCheck = [...offlineAccounts];me];
+    offlineAccounts = [];{
+    let live = [];tion = new WebcastPushConnection(username);
+    let offline = [];nections[username] = connection;
     let error = [];
-    
+        try {
     console.log(`[CHECK-LIVE] Checking ${accountsToCheck.length} accounts with rate limiting...`);
-    
+            await tikTokRateLimiter.canMakeRequest();
     for (const username of accountsToCheck) {
         let connection = activeConnections[username];
-        if (!connection) {
+        if (!connection) {nts.includes(username)) liveAccounts.push(username);
             connection = new WebcastPushConnection(username);
-            activeConnections[username] = connection;
-        }
-        try {
+            activeConnections[username] = connection;s LIVE`);
+        } catch (err) {
+        try {f (err.message && err.message.includes("isn't online")) {
             // Apply rate limiting before connection
             await tikTokRateLimiter.canMakeRequest();
-            
+                console.log(`[CHECK-LIVE] ⭕ ${username} is OFFLINE`);
             await connection.connect();
             if (!liveAccounts.includes(username)) liveAccounts.push(username);
-            live.push(username);
-            console.log(`[CHECK-LIVE] ✅ ${username} is LIVE`);
+            live.push(username);ame);
+            console.log(`[CHECK-LIVE] ✅ ${username} is LIVE`); ${err.message}`);
         } catch (err) {
             if (err.message && err.message.includes("isn't online")) {
-                offlineAccounts.push(username);
-                offline.push(username);
-                console.log(`[CHECK-LIVE] ⭕ ${username} is OFFLINE`);
-            } else {
-                errorAccounts.push(username);
-                error.push(username);
-                console.log(`[CHECK-LIVE] ❌ ${username} ERROR: ${err.message}`);
-            }
-        }
     }
     
     // Show rate limiter status
@@ -359,6 +325,122 @@ app.get('/api/get-list', (req, res) => {
 // Live data storage
 // Tambahkan penyimpanan msgId yang sudah diproses per user
 const processedGiftMsgIds = {};
+
+// Calculate hash of liveDataStore for deduplication
+function calculateDataHash(data) {
+    return crypto.createHash('md5').update(JSON.stringify(data)).digest('hex');
+}
+
+// Optimized Supabase backup with batching, debouncing, and deduplication
+async function performOptimizedSupabaseBackup(force = false) {
+    if (!SUPABASE_BACKUP_ENABLED || !supabaseClient.useSupabase()) {
+        return false;
+    }
+
+    const now = Date.now();
+    const timeSinceLastBackup = now - lastSupabaseBackup;
+    
+    // Check if we should skip this backup
+    if (!force && timeSinceLastBackup < SUPABASE_BACKUP_INTERVAL) {
+        console.log(`⏭️ Skipping Supabase backup (${Math.round(timeSinceLastBackup/1000)}s since last, minimum ${SUPABASE_BACKUP_INTERVAL/1000}s)`);
+        return false;
+    }
+
+    // Calculate current data hash for deduplication
+    const currentDataHash = calculateDataHash(liveDataStore);
+    if (!force && currentDataHash === lastSupabaseDataHash) {
+        console.log('⏭️ Skipping Supabase backup (no data changes detected)');
+        lastSupabaseBackup = now; // Update timestamp to prevent continuous checks
+        return false;
+    }
+
+    try {
+        console.log('🔄 Starting optimized Supabase backup...');
+        const startTime = Date.now();
+        
+        // Batch backup to avoid overwhelming Supabase
+        let totalSessions = 0;
+        let successfulBackups = 0;
+        let batchCount = 0;
+        
+        const allSessions = [];
+        for (const username in liveDataStore) {
+            const sessions = liveDataStore[username];
+            if (Array.isArray(sessions)) {
+                allSessions.push(...sessions.map(session => ({ ...session, username })));
+            }
+        }
+        
+        // Process in batches
+        for (let i = 0; i < allSessions.length; i += SUPABASE_BACKUP_BATCH_SIZE) {
+            const batch = allSessions.slice(i, i + SUPABASE_BACKUP_BATCH_SIZE);
+            batchCount++;
+            
+            console.log(`📦 Processing batch ${batchCount} (${batch.length} sessions)...`);
+            
+            for (const session of batch) {
+                try {
+                    const saved = await supabaseClient.saveSessionToSupabase(session);
+                    if (saved) successfulBackups++;
+                    totalSessions++;
+                } catch (error) {
+                    console.error(`❌ Failed to save session ${session.session_id}:`, error.message);
+                }
+            }
+            
+            // Small delay between batches to avoid rate limiting
+            if (i + SUPABASE_BACKUP_BATCH_SIZE < allSessions.length) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        }
+        
+        const duration = Date.now() - startTime;
+        console.log(`✅ Optimized Supabase backup completed: ${successfulBackups}/${totalSessions} sessions in ${duration}ms (${batchCount} batches)`);
+        
+        // Update tracking variables
+        lastSupabaseBackup = now;
+        lastSupabaseDataHash = currentDataHash;
+        pendingSupabaseBackup = false;
+        
+        return true;
+    } catch (error) {
+        console.error('❌ Optimized Supabase backup failed:', error);
+        pendingSupabaseBackup = false;
+        return false;
+    }
+}
+
+// Debounced Supabase backup
+function scheduleSupabaseBackup(force = false) {
+    if (!SUPABASE_BACKUP_ENABLED || !supabaseClient.useSupabase()) {
+        return;
+    }
+
+    // Clear existing timer
+    if (supabaseBackupDebounceTimer) {
+        clearTimeout(supabaseBackupDebounceTimer);
+    }
+
+    // Force backup immediately if requested or if it's been too long
+    const timeSinceLastBackup = Date.now() - lastSupabaseBackup;
+    if (force || timeSinceLastBackup >= SUPABASE_BACKUP_FORCE_INTERVAL) {
+        console.log('🚀 Force Supabase backup triggered');
+        performOptimizedSupabaseBackup(true);
+        return;
+    }
+
+    // Schedule debounced backup
+    if (!pendingSupabaseBackup) {
+        pendingSupabaseBackup = true;
+        console.log(`⏰ Scheduling Supabase backup in ${SUPABASE_BACKUP_DEBOUNCE_DELAY/1000}s...`);
+    }
+
+    supabaseBackupDebounceTimer = setTimeout(() => {
+        if (pendingSupabaseBackup) {
+            performOptimizedSupabaseBackup(false);
+        }
+    }, SUPABASE_BACKUP_DEBOUNCE_DELAY);
+}
 
 function saveLiveDataToFile() {
     fs.writeFileSync(liveDataFile, JSON.stringify(liveDataStore, null, 2));
@@ -600,19 +682,45 @@ app.get('/api/live-data', (req, res) => {
     res.json(liveDataStore);
 });
 
-// Health check endpoint for Railway/production
-app.get('/healthz', (req, res) => {
-    res.status(200).json({ status: 'ok', uptime: process.uptime(), timestamp: Date.now() });
+// Supabase backup management endpoints
+app.post('/api/supabase-backup', async (req, res) => {
+    try {
+        const { force } = req.body;
+        const result = await performOptimizedSupabaseBackup(force === true);
+        
+        if (result) {
+            res.json({ 
+                success: true, 
+                message: 'Supabase backup completed successfully',
+                timestamp: new Date().toISOString(),
+                forced: force === true
+            });
+        } else {
+            res.json({ 
+                success: false, 
+                message: 'Supabase backup skipped or failed',
+                timestamp: new Date().toISOString()
+            });
+        }
+    } catch (error) {
+        res.status(500).json({ 
+            success: false, 
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
 });
 
-// --- SUPABASE BACKUP API ENDPOINTS ---
+// Supabase backup endpoints
 app.post('/api/force-supabase-backup', async (req, res) => {
     try {
         if (!supabaseClient.useSupabase()) {
             return res.status(400).json({ error: 'Supabase not configured' });
         }
+        
         console.log('🚀 Manual Supabase backup requested');
         const success = await performOptimizedSupabaseBackup(true);
+        
         if (success) {
             res.json({ 
                 message: 'Manual Supabase backup completed successfully',
@@ -651,6 +759,163 @@ app.get('/api/supabase-status', (req, res) => {
         }
     });
 });
+
+// Health check endpoint for Railway/production
+app.get('/healthz', (req, res) => {
+    res.status(200).json({ status: 'ok', uptime: process.uptime(), timestamp: Date.now() });
+});
+
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: { origin: '*', methods: ['GET', 'POST'] }
+});
+
+// Emit status & account status to new socket.io client on connect
+io.on('connection', (socket) => {
+    emitStatusUpdate();
+    emitAccountStatusUpdate();
+});
+
+// Scheduled Supabase backup interval
+let scheduledBackupInterval = null;
+
+// Start scheduled backup interval
+function startScheduledBackup() {
+    if (scheduledBackupInterval) {
+        clearInterval(scheduledBackupInterval);
+    }
+    
+    if (SUPABASE_BACKUP_ENABLED && supabaseClient.useSupabase()) {
+        console.log(`🕐 Starting scheduled Supabase backup every ${SUPABASE_BACKUP_INTERVAL/1000/60} minutes`);
+        
+        scheduledBackupInterval = setInterval(async () => {
+            console.log('🕐 Scheduled Supabase backup triggered');
+            await performOptimizedSupabaseBackup(false);
+        }, SUPABASE_BACKUP_INTERVAL);
+    }
+}
+
+// Stop scheduled backup interval
+function stopScheduledBackup() {
+    if (scheduledBackupInterval) {
+        clearInterval(scheduledBackupInterval);
+        scheduledBackupInterval = null;
+        console.log('🛑 Scheduled Supabase backup stopped');
+    }
+}
+
+// Initialize server and start scheduled processes
+initializeServer().then(() => {
+    // Start scheduled backup after server initialization
+    startScheduledBackup();
+    
+    // Graceful shutdown handling
+    process.on('SIGTERM', async () => {
+        console.log('🔄 SIGTERM received, performing final backup...');
+        stopScheduledBackup();
+        await performOptimizedSupabaseBackup(true);
+        process.exit(0);
+    });
+    
+    process.on('SIGINT', async () => {
+        console.log('🔄 SIGINT received, performing final backup...');
+        stopScheduledBackup();
+        await performOptimizedSupabaseBackup(true);
+        process.exit(0);
+    });
+});
+
+server.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+});
+
+// Periodic save every 15 minutes
+setInterval(() => {
+    saveLiveDataToCSV();
+}, 15 * 60 * 1000);
+
+// Save all live data to CSV on exit
+process.on('SIGINT', () => {
+    saveLiveDataToCSV();
+    process.exit();
+});
+process.on('SIGTERM', () => {
+    saveLiveDataToCSV();
+    process.exit();
+});
+
+// CSV handling
+function saveLiveDataToCSV() {
+    // Header
+    const header = [
+        'tanggal dan jam', 'roomid', 'akun', 'durasi live', 'peakview', 'totalgift',
+        ...Array.from({length: 10}, (_, i) => `topspender${i+1}`)
+    ];
+    let rows = [header.join('|')];
+    for (const username in liveDataStore) {
+        const sessions = liveDataStore[username];
+        if (!Array.isArray(sessions)) continue;
+        sessions.forEach(data => {
+            if (!data.room_id) return; // skip if no room id
+            const tgl = data.timestamp_start || '-';
+            const row = [
+                tgl,
+                data.room_id,
+                data.username,
+                data.duration || '-',
+                data.peak_viewer || 0,
+                data.total_diamond || 0
+            ];
+            // Leaderboard sudah dipastikan hanya 10 teratas saat finalize, tapi tetap slice 10 untuk safety
+            const sorted = Object.entries(data.leaderboard||{}).sort((a,b)=>b[1]-a[1]).slice(0,10);
+            for (let i=0; i<10; i++) {
+                if (sorted[i]) {
+                    row.push(`${sorted[i][0]}(${sorted[i][1]})`);
+                } else {
+                    row.push('');
+                }
+            }
+            rows.push(row.join('|'));
+        });
+    }
+    fs.writeFileSync(csvFilePath, rows.join('\n'));
+}
+
+// Endpoint for save and download CSV
+app.get('/api/save-and-download-csv', (req, res) => {
+    saveLiveDataToCSV();
+    res.download(csvFilePath, 'live_data.csv');
+});
+
+// Global error handler untuk mencegah server crash
+process.on('uncaughtException', (err) => {
+    const msg = `[uncaughtException] ${new Date().toISOString()} - ${err.stack || err}`;
+    fs.appendFileSync(logFilePath, msg + '\n');
+    console.error(msg);
+    // Jangan exit, biarkan server tetap jalan
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    const msg = `[unhandledRejection] ${new Date().toISOString()} - ${reason && reason.stack ? reason.stack : reason}`;
+    fs.appendFileSync(logFilePath, msg + '\n');
+    console.error(msg);
+    // Jangan exit, biarkan server tetap jalan
+});
+
+// --- AUTORECOVER PATCH ---
+// On server start, if autorecover is on, trigger check-live and start-scraping
+async function doAutorecover() {
+    if (autorecover) {
+        fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] Autorecover ON: starting check-live and scraping\n`);
+        // Jalankan check-live
+        await new Promise(resolve => {
+            app.handle({ method: 'POST', url: '/api/check-live' }, { json: () => resolve() });
+        });
+        // Jalankan scraping
+        app.handle({ method: 'POST', url: '/api/start-scraping-all' }, { json: () => { emitStatusUpdate(); } });
+    }
+}
+doAutorecover();
 
 // --- FINALIZE HANGING LIVE SESSIONS ON STARTUP ---
 function finalizeHangingLiveSessionsOnStartup() {
@@ -1297,167 +1562,5 @@ app.post('/api/initialize-accounts', (req, res) => {
             error: errorAccounts
         },
         liveData: liveDataStore
-    });
-});
-
-// Calculate hash of liveDataStore for deduplication
-function calculateDataHash(data) {
-    return crypto.createHash('md5').update(JSON.stringify(data)).digest('hex');
-}
-
-// Optimized Supabase backup with batching, debouncing, and deduplication
-async function performOptimizedSupabaseBackup(force = false) {
-    if (!SUPABASE_BACKUP_ENABLED || !supabaseClient.useSupabase()) {
-        return false;
-    }
-
-    const now = Date.now();
-    const timeSinceLastBackup = now - lastSupabaseBackup;
-    
-    // Check if we should skip this backup
-    if (!force && timeSinceLastBackup < SUPABASE_BACKUP_INTERVAL) {
-        console.log(`⏭️ Skipping Supabase backup (${Math.round(timeSinceLastBackup/1000)}s since last, minimum ${SUPABASE_BACKUP_INTERVAL/1000}s)`);
-        return false;
-    }
-
-    // Calculate current data hash for deduplication
-    const currentDataHash = calculateDataHash(liveDataStore);
-    if (!force && currentDataHash === lastSupabaseDataHash) {
-        console.log('⏭️ Skipping Supabase backup (no data changes detected)');
-        lastSupabaseBackup = now; // Update timestamp to prevent continuous checks
-        return false;
-    }
-
-    try {
-        console.log('🔄 Starting optimized Supabase backup...');
-        const startTime = Date.now();
-        
-        // Batch backup to avoid overwhelming Supabase
-        let totalSessions = 0;
-        let successfulBackups = 0;
-        let batchCount = 0;
-        
-        const allSessions = [];
-        for (const username in liveDataStore) {
-            const sessions = liveDataStore[username];
-            if (Array.isArray(sessions)) {
-                allSessions.push(...sessions.map(session => ({ ...session, username })));
-            }
-        }
-        
-        // Process in batches
-        for (let i = 0; i < allSessions.length; i += SUPABASE_BACKUP_BATCH_SIZE) {
-            const batch = allSessions.slice(i, i + SUPABASE_BACKUP_BATCH_SIZE);
-            batchCount++;
-            
-            console.log(`📦 Processing batch ${batchCount} (${batch.length} sessions)...`);
-            
-            for (const session of batch) {
-                try {
-                    const saved = await supabaseClient.saveSessionToSupabase(session);
-                    if (saved) successfulBackups++;
-                    totalSessions++;
-                } catch (error) {
-                    console.error(`❌ Failed to save session ${session.session_id}:`, error.message);
-                }
-            }
-            
-            // Small delay between batches to avoid rate limiting
-            if (i + SUPABASE_BACKUP_BATCH_SIZE < allSessions.length) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-        }
-        
-        const duration = Date.now() - startTime;
-        console.log(`✅ Optimized Supabase backup completed: ${successfulBackups}/${totalSessions} sessions in ${duration}ms (${batchCount} batches)`);
-        
-        // Update tracking variables
-        lastSupabaseBackup = now;
-        lastSupabaseDataHash = currentDataHash;
-        pendingSupabaseBackup = false;
-        
-        return true;
-    } catch (error) {
-        console.error('❌ Optimized Supabase backup failed:', error);
-        pendingSupabaseBackup = false;
-        return false;
-    }
-}
-
-// Debounced Supabase backup
-function scheduleSupabaseBackup(force = false) {
-    if (!SUPABASE_BACKUP_ENABLED || !supabaseClient.useSupabase()) {
-        return;
-    }
-
-    // Clear existing timer
-    if (supabaseBackupDebounceTimer) {
-        clearTimeout(supabaseBackupDebounceTimer);
-    }
-
-    // Force backup immediately if requested or if it's been too long
-    const timeSinceLastBackup = Date.now() - lastSupabaseBackup;
-    if (force || timeSinceLastBackup >= SUPABASE_BACKUP_FORCE_INTERVAL) {
-        console.log('🚀 Force Supabase backup triggered');
-        performOptimizedSupabaseBackup(true);
-        return;
-    }
-
-    // Schedule debounced backup
-    if (!pendingSupabaseBackup) {
-        pendingSupabaseBackup = true;
-        console.log(`⏰ Scheduling Supabase backup in ${SUPABASE_BACKUP_DEBOUNCE_DELAY/1000}s...`);
-    }
-
-    supabaseBackupDebounceTimer = setTimeout(() => {
-        if (pendingSupabaseBackup) {
-            performOptimizedSupabaseBackup(false);
-        }
-    }, SUPABASE_BACKUP_DEBOUNCE_DELAY);
-}
-
-// Emit status & account status to new socket.io client on connect
-io.on('connection', (socket) => {
-    emitStatusUpdate();
-    emitAccountStatusUpdate();
-});
-
-// --- SCHEDULED SUPABASE BACKUP SYSTEM ---
-let scheduledBackupInterval = null;
-function startScheduledBackup() {
-    if (scheduledBackupInterval) {
-        clearInterval(scheduledBackupInterval);
-    }
-    if (SUPABASE_BACKUP_ENABLED && supabaseClient.useSupabase()) {
-        console.log(`🕐 Starting scheduled Supabase backup every ${SUPABASE_BACKUP_INTERVAL/1000/60} minutes`);
-        scheduledBackupInterval = setInterval(async () => {
-            console.log('🕐 Scheduled Supabase backup triggered');
-            await performOptimizedSupabaseBackup(false);
-        }, SUPABASE_BACKUP_INTERVAL);
-    }
-}
-function stopScheduledBackup() {
-    if (scheduledBackupInterval) {
-        clearInterval(scheduledBackupInterval);
-        scheduledBackupInterval = null;
-        console.log('🛑 Scheduled Supabase backup stopped');
-    }
-}
-
-// Jalankan scheduled backup setelah server inisialisasi
-initializeServer().then(() => {
-    startScheduledBackup();
-    // Graceful shutdown handling
-    process.on('SIGTERM', async () => {
-        console.log('🔄 SIGTERM received, performing final backup...');
-        stopScheduledBackup();
-        await performOptimizedSupabaseBackup(true);
-        process.exit(0);
-    });
-    process.on('SIGINT', async () => {
-        console.log('🔄 SIGINT received, performing final backup...');
-        stopScheduledBackup();
-        await performOptimizedSupabaseBackup(true);
-        process.exit(0);
     });
 });

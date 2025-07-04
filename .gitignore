@@ -72,3 +72,24 @@ data/live-metadata/*.json
 !.env.example
 !docs/**/*.md
 !scripts/*.sql
+
+# Discontinued pilot projects - ARCHIVED
+pilot-account-discovery/src/
+pilot-account-discovery/node_modules/
+pilot-account-discovery/data/sessions/
+pilot-account-discovery/.env
+pilot-account-discovery/.env.*
+pilot-account-discovery/package-lock.json
+pilot-account-discovery/yarn.lock
+pilot-account-discovery/*.log
+pilot-account-discovery/temp/
+pilot-account-discovery/tmp/
+
+# Keep documentation and sample data only
+!pilot-account-discovery/docs/
+!pilot-account-discovery/data/accounts.json
+!pilot-account-discovery/data/working_library_report.md
+!pilot-account-discovery/README.md
+!pilot-account-discovery/PILOT_RESULTS_SUMMARY.md
+!pilot-account-discovery/ARCHIVE_STATUS.md
+!pilot-account-discovery/package.json
