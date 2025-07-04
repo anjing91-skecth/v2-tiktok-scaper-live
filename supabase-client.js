@@ -168,6 +168,11 @@ async function backupToSupabase(liveDataStore) {
     }
 }
 
+// Save data to Supabase (alias for backupToSupabase for compatibility)
+async function saveDataToSupabase(liveDataStore) {
+    return await backupToSupabase(liveDataStore);
+}
+
 // Get Supabase status
 function getSupabaseStatus() {
     return {
@@ -180,6 +185,7 @@ function getSupabaseStatus() {
 module.exports = {
     initializeSupabase,
     saveSessionToSupabase,
+    saveDataToSupabase,
     loadDataFromSupabase,
     backupToSupabase,
     getSupabaseStatus,
